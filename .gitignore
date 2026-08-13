@@ -1,22 +1,31 @@
-# Python / Virtual Environment
-backend/venv/
-backend/__pycache__/
+# Virtual Environments & Python Cache
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
 *.pyc
 
 # Environment & Secrets
 .env
 backend/.env
+**/.env
 *.env
 
 # Vector Stores & Dataset Cache
-backend/chroma_db/
-backend/vector_store/
-backend/dataset/sec_10k/*.json
+chroma_db/
+**/chroma_db/
+vector_store/
+**/vector_store/
+dataset/
+**/dataset/
 
 # Node / React
-frontend/node_modules/
-frontend/dist/
-frontend/.vite/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.vite/
+**/.vite/
 
 # OS & IDE Files
 .DS_Store
