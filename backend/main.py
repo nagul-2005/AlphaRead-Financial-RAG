@@ -22,21 +22,18 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS setup to allow React frontend (Vercel production & local dev)
-origins = [
-    "https://alpha-read-financial.vercel.app",
-    "http://localhost:5173",
-    "http://localhost:3000",
-]
-
+# Universal CORS setup to allow all public origins (Vercel, localhost, mobile)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_origin_regex=r"https://.*\.vercel\.app",
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.options("/{full_path:path}")
+async def options_handler(full_path: str):
+    return {"status": "ok"}
 
 # Request Models
 class SecIngestRequest(BaseModel):
