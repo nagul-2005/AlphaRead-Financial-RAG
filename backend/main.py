@@ -22,10 +22,17 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS setup to allow React frontend
+# CORS setup to allow React frontend (Vercel production & local dev)
+origins = [
+    "https://alpha-read-financial.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows requests from Vite (http://localhost:5173) and any local origin
+    allow_origins=origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
