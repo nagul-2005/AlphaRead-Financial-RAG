@@ -22,7 +22,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Universal CORS setup to allow all public origins (Vercel, localhost, mobile)
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+
+# Universal CORS setup allowing all public origins
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -31,9 +34,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.options("/{full_path:path}")
-async def options_handler(full_path: str):
-    return {"status": "ok"}
+@app.middleware("http")
+async def add_cors_headers_always(request: Request, call_next):
+    if request.method == "OPTIONS":
+        response = Response(status_code=200)
+    else:
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            logger.error(f"Unhandled server error: {exc}")
+            response = JSONResponse(
+                status_code=500,
+                content={"detail": str(exc)}
+            )
+            
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 # Request Models
 class SecIngestRequest(BaseModel):
