@@ -1,0 +1,25 @@
+# Python / Virtual Environment
+backend/venv/
+backend/__pycache__/
+*.pyc
+
+# Environment & Secrets
+.env
+backend/.env
+*.env
+
+# Vector Stores & Dataset Cache
+backend/chroma_db/
+backend/vector_store/
+backend/dataset/sec_10k/*.json
+
+# Node / React
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# OS & IDE Files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
