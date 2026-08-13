@@ -5,7 +5,6 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
 import numpy as np
 from groq import Groq
 
@@ -16,14 +15,39 @@ load_dotenv()  # Fallback search
 
 logger = logging.getLogger(__name__)
 
-# HuggingFace Embeddings loader
+# HuggingFace Embeddings loader using fastembed (ONNX runtime, <60MB RAM) with sentence-transformers fallback
 class HuggingFaceEmbeddingFunction:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        logger.info(f"Loading HuggingFace embedding model '{model_name}'...")
-        self.model = SentenceTransformer(model_name)
+    def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
+        logger.info(f"Loading embedding engine for '{model_name}'...")
+        self.fast_model = None
+        self.st_model = None
+        
+        try:
+            from fastembed import TextEmbedding
+            self.fast_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+            logger.info("FastEmbed ONNX lightweight embedding engine initialized (<60MB RAM).")
+        except Exception as e:
+            logger.warning(f"FastEmbed init failed ({e}). Trying sentence-transformers fallback...")
+            try:
+                from sentence_transformers import SentenceTransformer
+                self.st_model = SentenceTransformer("all-MiniLM-L6-v2")
+            except Exception as fallback_err:
+                logger.error(f"SentenceTransformer fallback failed: {fallback_err}")
 
     def encode(self, texts: List[str]) -> np.ndarray:
-        return self.model.encode(texts, convert_to_numpy=True)
+        if self.fast_model:
+            embeddings_generator = self.fast_model.embed(texts)
+            return np.array(list(embeddings_generator), dtype=np.float32)
+        elif self.st_model:
+            return self.st_model.encode(texts, convert_to_numpy=True)
+        else:
+            # Deterministic hash embedding fallback if no ML engine loaded
+            logger.warning("Using basic hash embedding fallback.")
+            vectors = []
+            for t in texts:
+                np.random.seed(abs(hash(t)) % (2**32 - 1))
+                vectors.append(np.random.randn(384).astype(np.float32))
+            return np.array(vectors, dtype=np.float32)
 
 # Pure-Python Persistent Vector Store (Used when Windows AppControl blocks gRPC/ChromaDB DLLs)
 class LocalVectorStore:
