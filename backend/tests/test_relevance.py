@@ -26,7 +26,7 @@ class BGERerankerCalibrationTests(unittest.TestCase):
             "A PAN card supports tax transactions in India for NRIs and OCIs.",
             0.496,
         )
-        self.assertLess(score, 0.35)
+        self.assertEqual(score, 0.248)
 
     def test_fastembed_keeps_a_multi_term_pan_citizenship_match(self):
         score = fastembed_relevance_score(
@@ -34,4 +34,4 @@ class BGERerankerCalibrationTests(unittest.TestCase):
             "To change citizenship in a PAN card, notify the assessing officer.",
             0.496,
         )
-        self.assertGreaterEqual(score, 0.35)
+        self.assertEqual(score, 0.496)

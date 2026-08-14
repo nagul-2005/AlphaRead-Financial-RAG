@@ -70,5 +70,9 @@ def fastembed_relevance_score(query: str, content: str, raw_score: Optional[floa
 
     content_terms = set(re.findall(r"[a-z0-9]+", content.lower()))
     coverage = len(query_terms & content_terms) / len(query_terms)
-    evidence_weight = 0.30 + (0.70 * coverage)
-    return round(min(0.99, max(0.02, ranking_score * evidence_weight)), 3)
+
+    # Preserve the reranker's confidence once the passage covers most of the
+    # meaningful query terms.  Otherwise, penalize a partial/generic overlap
+    # ("India" alone for a question about the President of India, for example).
+    guarded_score = ranking_score if coverage >= 0.60 else ranking_score * coverage
+    return round(min(0.99, max(0.02, guarded_score)), 3)
