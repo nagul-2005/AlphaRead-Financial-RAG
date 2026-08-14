@@ -1,7 +1,16 @@
 """Pure helpers for converting reranker outputs into citation confidence."""
 
 import math
+import re
 from typing import Optional
+
+
+QUERY_STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "did", "do",
+    "does", "for", "from", "has", "have", "how", "i", "in", "is", "it",
+    "of", "on", "or", "the", "their", "to", "was", "what", "when", "where",
+    "which", "who", "why", "with", "would", "you", "your",
+}
 
 
 def calibrate_bge_reranker_score(
@@ -31,3 +40,35 @@ def calibrate_bge_reranker_score(
 
     calibrated = 1.0 / (1.0 + math.exp(-(score - 2.0)))
     return round(min(0.99, max(0.02, calibrated)), 3)
+
+
+def fastembed_relevance_score(query: str, content: str, raw_score: Optional[float]) -> Optional[float]:
+    """Score FastEmbed's bounded reranker output with a lexical evidence guard.
+
+    FastEmbed returns a useful ranking score in the 0--1 range, but it is not a
+    calibrated probability.  Weighting it by query-term coverage prevents a
+    generic shared term (such as "India") from making an unrelated chunk appear
+    relevant while preserving genuinely matching document passages.
+    """
+    if raw_score is None:
+        return None
+
+    try:
+        ranking_score = float(raw_score)
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(ranking_score):
+        return None
+
+    query_terms = {
+        token for token in re.findall(r"[a-z0-9]+", query.lower())
+        if len(token) > 2 and token not in QUERY_STOP_WORDS
+    }
+    if not query_terms:
+        return round(min(0.99, max(0.02, ranking_score)), 3)
+
+    content_terms = set(re.findall(r"[a-z0-9]+", content.lower()))
+    coverage = len(query_terms & content_terms) / len(query_terms)
+    evidence_weight = 0.30 + (0.70 * coverage)
+    return round(min(0.99, max(0.02, ranking_score * evidence_weight)), 3)

@@ -9,7 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import numpy as np
 from groq import Groq
 from rank_bm25 import BM25Okapi
-from relevance import calibrate_bge_reranker_score
+from relevance import calibrate_bge_reranker_score, fastembed_relevance_score
 
 # Explicitly load .env file from backend folder
 env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -170,12 +170,13 @@ class CrossEncoderReranker:
                     score_val = item.get("score") if isinstance(item, dict) else getattr(item, "score", None)
                     
                     c_orig = candidates[c_idx]
-                    # FastEmbed exposes a sigmoid score, not the model logit.
-                    final_score = compute_true_score(
-                        c_orig,
-                        raw_rerank_s=float(score_val) if score_val is not None else None,
-                        score_is_probability=True
-                    )
+                    # FastEmbed supplies a bounded ranking score, while the
+                    # SentenceTransformers branch below uses BGE logits.  Use
+                    # a lexical evidence guard here instead of logit
+                    # calibration so valid matches are not over-filtered.
+                    final_score = fastembed_relevance_score(query, c_orig["content"], score_val)
+                    if final_score is None:
+                        final_score = compute_true_score(c_orig)
                     c_copy = dict(c_orig)
                     c_copy["reranker_score"] = float(score_val) if score_val is not None else None
                     c_copy["relevance_score"] = final_score
