@@ -120,18 +120,29 @@ class CrossEncoderReranker:
         if not candidates:
             return []
 
-        # Helper to convert raw CrossEncoder logits/scores to realistic 75-98% match percentages
-        def normalize_score(raw_s: float, rank_idx: int = 0, dense_s: float = 0.0) -> float:
-            if 0.55 <= dense_s <= 1.0:
-                return round(dense_s, 3)
-            if 0.55 <= raw_s <= 1.0:
-                return round(raw_s, 3)
-            # Sigmoid on raw logits
-            prob = float(1.0 / (1.0 + np.exp(-float(raw_s))))
-            if prob >= 0.55:
-                return round(prob, 3)
-            # Rank decay fallback: 0.95, 0.91, 0.87...
-            return round(max(0.75, 0.95 - (rank_idx * 0.04)), 3)
+    def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = TOP_K_RERANKED) -> List[Dict[str, Any]]:
+        if not candidates:
+            return []
+
+        def compute_true_score(cand: Dict[str, Any], raw_rerank_s: Optional[float] = None) -> float:
+            """Computes real relevance percentage without artificial score inflation."""
+            if raw_rerank_s is not None:
+                if 0.0 <= raw_rerank_s <= 1.0:
+                    return round(raw_rerank_s, 3)
+                prob = float(1.0 / (1.0 + np.exp(-float(raw_rerank_s))))
+                return round(min(0.99, max(0.05, prob)), 3)
+
+            # Use true dense vector cosine similarity if available
+            d_s = float(cand.get("dense_score", 0.0))
+            if d_s > 0.0:
+                return round(min(0.99, max(0.05, d_s)), 3)
+
+            # BM25 keyword score fallback
+            bm25_s = float(cand.get("bm25_score", 0.0))
+            if bm25_s > 0.0:
+                return round(min(0.80, max(0.15, bm25_s / 30.0)), 3)
+
+            return 0.10
 
         # FastPath 1: FastEmbed ONNX TextReRanker (<50MB RAM)
         if self.fast_reranker:
@@ -142,10 +153,10 @@ class CrossEncoderReranker:
                 scored_candidates = []
                 for idx, item in enumerate(rerank_results):
                     c_idx = item.get("index") if isinstance(item, dict) else getattr(item, "index", idx)
-                    score_val = item.get("score") if isinstance(item, dict) else getattr(item, "score", 0.90)
+                    score_val = item.get("score") if isinstance(item, dict) else getattr(item, "score", None)
                     
                     c_orig = candidates[c_idx]
-                    final_score = normalize_score(float(score_val), rank_idx=idx, dense_s=c_orig.get("dense_score", 0.0))
+                    final_score = compute_true_score(c_orig, raw_rerank_s=float(score_val) if score_val is not None else None)
                     c_copy = dict(c_orig)
                     c_copy["reranker_score"] = final_score
                     c_copy["relevance_score"] = final_score
@@ -166,7 +177,7 @@ class CrossEncoderReranker:
 
                 scored_candidates = []
                 for idx, (candidate, score) in enumerate(zip(candidates, scores)):
-                    final_score = normalize_score(float(score), rank_idx=idx, dense_s=candidate.get("dense_score", 0.0))
+                    final_score = compute_true_score(candidate, raw_rerank_s=float(score))
                     c_copy = dict(candidate)
                     c_copy["reranker_score"] = final_score
                     c_copy["relevance_score"] = final_score
@@ -177,18 +188,15 @@ class CrossEncoderReranker:
             except Exception as e:
                 logger.error(f"Error during ST CrossEncoder reranking: {e}")
 
-        # Fallback: Preserve true Dense Similarity or Rank Order
+        # Fallback: Preserve true Dense Vector Similarity
         scored_candidates = []
-        for rank_idx, c in enumerate(candidates):
+        for c in candidates:
             c_copy = dict(c)
-            d_s = float(c.get("dense_score", 0.0))
-            if 0.55 <= d_s <= 1.0:
-                final_score = round(d_s, 3)
-            else:
-                final_score = round(max(0.75, 0.95 - (rank_idx * 0.04)), 3)
+            final_score = compute_true_score(c)
             c_copy["relevance_score"] = final_score
             scored_candidates.append(c_copy)
             
+        scored_candidates.sort(key=lambda x: x["relevance_score"], reverse=True)
         return scored_candidates[:top_k]
 
 # Pure-Python Persistent Vector Store
