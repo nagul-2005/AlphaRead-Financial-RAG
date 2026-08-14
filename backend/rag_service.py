@@ -484,8 +484,17 @@ class RAGEngine:
             for idx in range(len(docs)):
                 doc_text = docs[idx]
                 meta = metas[idx] if idx < len(metas) else {}
-                dist = distances[idx] if idx < len(distances) else 0.5
-                similarity = round(max(0.0, 1.0 - float(dist)), 3)
+                dist = distances[idx] if idx < len(distances) else 0.8
+                raw_similarity = max(0.0, 1.0 - float(dist))
+                
+                # Calibrate raw vector similarity to subtract high-dimensional baseline (~0.50)
+                # Unrelated text (raw sim ~ 0.50) -> calibrated sim ~ 0.05
+                # Highly relevant text (raw sim ~ 0.85-0.95) -> calibrated sim ~ 0.70-0.90
+                if raw_similarity <= 0.50:
+                    calibrated_similarity = round(max(0.02, raw_similarity * 0.3), 3)
+                else:
+                    calibrated_similarity = round(min(0.99, (raw_similarity - 0.50) / 0.50 * 0.70 + 0.30), 3)
+                    
                 chunk_id = meta.get("chunk_id", f"{meta.get('source', 'doc')}_chunk_{meta.get('chunk_index', idx)}")
                 
                 retrieved_chunks.append({
@@ -495,7 +504,7 @@ class RAGEngine:
                     "page": meta.get("page_number", meta.get("section", "N/A")),
                     "ticker": meta.get("ticker", "N/A"),
                     "chunk_index": meta.get("chunk_index", idx),
-                    "dense_score": similarity
+                    "dense_score": calibrated_similarity
                 })
                 
         return retrieved_chunks
