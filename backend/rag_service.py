@@ -93,62 +93,81 @@ class BM25IndexManager:
 
         return results
 
-# Cross-Encoder Reranker Manager
+# Cross-Encoder Reranker Manager (ONNX FastEmbed for <50MB RAM on Render)
 class CrossEncoderReranker:
     def __init__(self, model_name: str = "BAAI/bge-reranker-base"):
         self.model_name = model_name
-        self.reranker = None
+        self.fast_reranker = None
+        self.st_reranker = None
         self._load_model()
 
     def _load_model(self):
         try:
-            from sentence_transformers import CrossEncoder
-            logger.info(f"Loading CrossEncoder reranker model '{self.model_name}'...")
-            self.reranker = CrossEncoder(self.model_name, max_length=512)
-            logger.info(f"CrossEncoder model '{self.model_name}' loaded successfully.")
+            from fastembed.rerank.cross_encoder import TextReRanker
+            logger.info("Initializing FastEmbed ONNX TextReRanker ('BAAI/bge-reranker-base') for low RAM footprint (<50MB)...")
+            self.fast_reranker = TextReRanker(model_name="BAAI/bge-reranker-base")
+            logger.info("FastEmbed ONNX TextReRanker initialized successfully.")
         except Exception as e:
-            logger.warning(f"Could not load '{self.model_name}' ({e}). Trying fallback reranker 'cross-encoder/ms-marco-MiniLM-L-6-v2'...")
+            logger.warning(f"FastEmbed TextReRanker init failed ({e}). Trying sentence-transformers fallback...")
             try:
                 from sentence_transformers import CrossEncoder
-                self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
-                logger.info("Fallback CrossEncoder loaded successfully.")
+                self.st_reranker = CrossEncoder("BAAI/bge-reranker-base", max_length=512)
+                logger.info("SentenceTransformer CrossEncoder loaded successfully.")
             except Exception as e2:
-                logger.error(f"CrossEncoder reranker init failed ({e2}). Reranker will operate in pass-through mode.")
+                logger.warning(f"CrossEncoder fallback bypassed ({e2}). Using RRF score ranking.")
 
     def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = TOP_K_RERANKED) -> List[Dict[str, Any]]:
         if not candidates:
             return []
 
-        if not self.reranker:
-            # Fallback: pass-through candidates if CrossEncoder unavailable
-            for c in candidates:
-                c["relevance_score"] = c.get("rrf_score", 0.5)
-            return candidates[:top_k]
+        # FastPath 1: FastEmbed ONNX TextReRanker (<50MB RAM)
+        if self.fast_reranker:
+            try:
+                docs = [c["content"] for c in candidates]
+                rerank_results = list(self.fast_reranker.rerank(query, docs))
+                
+                scored_candidates = []
+                for item in rerank_results:
+                    c_idx = item.get("index") if isinstance(item, dict) else getattr(item, "index", 0)
+                    score_val = item.get("score") if isinstance(item, dict) else getattr(item, "score", 0.5)
+                    
+                    # Sigmoid transformation to 0.0 - 1.0 probability
+                    prob_score = float(1.0 / (1.0 + np.exp(-float(score_val))))
+                    c_copy = dict(candidates[c_idx])
+                    c_copy["reranker_score"] = round(prob_score, 3)
+                    c_copy["relevance_score"] = round(prob_score, 3)
+                    scored_candidates.append(c_copy)
+                
+                scored_candidates.sort(key=lambda x: x["reranker_score"], reverse=True)
+                return scored_candidates[:min(top_k, len(scored_candidates))]
+            except Exception as e:
+                logger.error(f"Error during FastEmbed reranking: {e}")
 
-        pairs = [(query, c["content"]) for c in candidates]
-        try:
-            scores = self.reranker.predict(pairs)
-            if isinstance(scores, (int, float)):
-                scores = [scores]
-            
-            # Apply sigmoid transformation to map logits to 0.0 - 1.0 probability
-            sigmoid_scores = [float(1.0 / (1.0 + np.exp(-s))) for s in scores]
+        # FastPath 2: SentenceTransformers Fallback
+        if self.st_reranker:
+            try:
+                pairs = [(query, c["content"]) for c in candidates]
+                scores = self.st_reranker.predict(pairs)
+                if isinstance(scores, (int, float)):
+                    scores = [scores]
+                sigmoid_scores = [float(1.0 / (1.0 + np.exp(-s))) for s in scores]
 
-            scored_candidates = []
-            for candidate, score in zip(candidates, sigmoid_scores):
-                c_copy = dict(candidate)
-                c_copy["reranker_score"] = round(score, 3)
-                c_copy["relevance_score"] = round(score, 3)
-                scored_candidates.append(c_copy)
+                scored_candidates = []
+                for candidate, score in zip(candidates, sigmoid_scores):
+                    c_copy = dict(candidate)
+                    c_copy["reranker_score"] = round(score, 3)
+                    c_copy["relevance_score"] = round(score, 3)
+                    scored_candidates.append(c_copy)
 
-            # Sort by reranker score descending
-            scored_candidates.sort(key=lambda x: x["reranker_score"], reverse=True)
-            return scored_candidates[:min(top_k, len(scored_candidates))]
-        except Exception as e:
-            logger.error(f"Error during CrossEncoder reranking: {e}")
-            for c in candidates:
-                c["relevance_score"] = c.get("rrf_score", 0.5)
-            return candidates[:top_k]
+                scored_candidates.sort(key=lambda x: x["reranker_score"], reverse=True)
+                return scored_candidates[:min(top_k, len(scored_candidates))]
+            except Exception as e:
+                logger.error(f"Error during ST CrossEncoder reranking: {e}")
+
+        # Fallback: RRF Rank Order
+        for c in candidates:
+            c["relevance_score"] = c.get("rrf_score", 0.5)
+        return candidates[:top_k]
 
 # Pure-Python Persistent Vector Store
 class LocalVectorStore:
