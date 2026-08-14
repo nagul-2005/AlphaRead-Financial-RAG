@@ -76,8 +76,8 @@ export default function MessageBubble({ message }) {
                             <span className="text-[10px] text-slate-500 font-medium">
                               Page/Sec: {citation.section_or_page}
                             </span>
-                            {(() => {
-                              const score = typeof citation.relevance_score === 'number' ? citation.relevance_score : 0.85;
+                            {typeof citation.relevance_score === 'number' && (() => {
+                              const score = citation.relevance_score;
                               const pct = Math.round(score * 100);
                               const badgeStyle = pct >= 70 
                                 ? "bg-emerald-100 text-emerald-800 border-emerald-200" 

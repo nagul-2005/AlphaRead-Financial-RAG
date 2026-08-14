@@ -9,6 +9,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 import numpy as np
 from groq import Groq
 from rank_bm25 import BM25Okapi
+from relevance import calibrate_bge_reranker_score
 
 # Explicitly load .env file from backend folder
 env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -124,7 +125,12 @@ class CrossEncoderReranker:
         if not candidates:
             return []
 
-        def compute_true_score(cand: Dict[str, Any], raw_rerank_s: Optional[float] = None) -> float:
+        def compute_true_score(
+            cand: Dict[str, Any],
+            raw_rerank_s: Optional[float] = None,
+            *,
+            score_is_probability: bool = False
+        ) -> float:
             """
             Computes exact relevance match score using BGE CrossEncoder logit calibration.
             BGE decision threshold center is ~ 2.0.
@@ -133,14 +139,13 @@ class CrossEncoderReranker:
             """
             d_s = float(cand.get("dense_score", 0.0))
 
-            if raw_rerank_s is not None and float(raw_rerank_s) != 0.0:
-                val = float(raw_rerank_s)
-                if 0.05 < val <= 1.0:
-                    return round(val, 3)
-                # Calibrated logit shift: val - 2.0
-                calibrated_val = val - 2.0
-                prob = float(1.0 / (1.0 + np.exp(-calibrated_val)))
-                return round(min(0.99, max(0.02, prob)), 3)
+            if raw_rerank_s is not None:
+                calibrated = calibrate_bge_reranker_score(
+                    raw_rerank_s,
+                    score_is_probability=score_is_probability
+                )
+                if calibrated is not None:
+                    return calibrated
 
             # Use true dense vector cosine similarity
             if d_s > 0.0:
@@ -165,9 +170,14 @@ class CrossEncoderReranker:
                     score_val = item.get("score") if isinstance(item, dict) else getattr(item, "score", None)
                     
                     c_orig = candidates[c_idx]
-                    final_score = compute_true_score(c_orig, raw_rerank_s=float(score_val) if score_val is not None else None)
+                    # FastEmbed exposes a sigmoid score, not the model logit.
+                    final_score = compute_true_score(
+                        c_orig,
+                        raw_rerank_s=float(score_val) if score_val is not None else None,
+                        score_is_probability=True
+                    )
                     c_copy = dict(c_orig)
-                    c_copy["reranker_score"] = final_score
+                    c_copy["reranker_score"] = float(score_val) if score_val is not None else None
                     c_copy["relevance_score"] = final_score
                     scored_candidates.append(c_copy)
                 
@@ -180,7 +190,16 @@ class CrossEncoderReranker:
         if self.st_reranker:
             try:
                 pairs = [(query, c["content"]) for c in candidates]
-                scores = self.st_reranker.predict(pairs)
+                # CrossEncoder.predict applies sigmoid by default for one-label
+                # models.  Request logits so the BGE calibration below is only
+                # applied once; treating the default output as a percentage was
+                # the source of unrelated 50%+ citation matches.
+                import torch
+                scores = self.st_reranker.predict(
+                    pairs,
+                    activation_fn=torch.nn.Identity(),
+                    show_progress_bar=False
+                )
                 if isinstance(scores, (int, float)):
                     scores = [scores]
 
@@ -188,7 +207,7 @@ class CrossEncoderReranker:
                 for idx, (candidate, score) in enumerate(zip(candidates, scores)):
                     final_score = compute_true_score(candidate, raw_rerank_s=float(score))
                     c_copy = dict(candidate)
-                    c_copy["reranker_score"] = final_score
+                    c_copy["reranker_score"] = float(score)
                     c_copy["relevance_score"] = final_score
                     scored_candidates.append(c_copy)
 
@@ -409,6 +428,7 @@ class RAGEngine:
             chunk_id = f"{source_name}_chunk_{idx}_{hash(chunk) & 0xffffffff}"
             chunk_meta = {
                 **base_meta,
+                "chunk_id": chunk_id,
                 "chunk_index": idx,
                 "source": source_name,
                 "snippet": chunk[:150] + "..."
@@ -495,13 +515,16 @@ class RAGEngine:
 
         # Process Dense Ranks
         for rank, item in enumerate(dense_results, start=1):
-            doc_id = item.get("id") or f"{item['source']}_{item['chunk_index']}_{hash(item['content'])}"
+            # Both retrieval paths must use the same identity.  Old Chroma
+            # metadata may not have ``chunk_id``, so source + chunk index is
+            # used as a backwards-compatible canonical key.
+            doc_id = f"{item['source']}::{item.get('chunk_index', 0)}"
             doc_map[doc_id] = item
             rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + (1.0 / (rrf_k + rank))
 
         # Process BM25 Ranks
         for rank, item in enumerate(bm25_results, start=1):
-            doc_id = item.get("id") or f"{item['source']}_{item['chunk_index']}_{hash(item['content'])}"
+            doc_id = f"{item['source']}::{item.get('chunk_index', 0)}"
             if doc_id not in doc_map:
                 doc_map[doc_id] = item
             rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + (1.0 / (rrf_k + rank))
