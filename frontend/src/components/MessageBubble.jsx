@@ -76,9 +76,20 @@ export default function MessageBubble({ message }) {
                             <span className="text-[10px] text-slate-500 font-medium">
                               Page/Sec: {citation.section_or_page}
                             </span>
-                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
-                              {Math.round((citation.relevance_score || 0.85) * 100)}% Match
-                            </span>
+                            {(() => {
+                              const score = typeof citation.relevance_score === 'number' ? citation.relevance_score : 0.85;
+                              const pct = Math.round(score * 100);
+                              const badgeStyle = pct >= 70 
+                                ? "bg-emerald-100 text-emerald-800 border-emerald-200" 
+                                : pct >= 40 
+                                  ? "bg-amber-100 text-amber-800 border-amber-200" 
+                                  : "bg-slate-100 text-slate-700 border-slate-200";
+                              return (
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeStyle}`}>
+                                  {pct}% Match
+                                </span>
+                              );
+                            })()}
                           </div>
                         </div>
 

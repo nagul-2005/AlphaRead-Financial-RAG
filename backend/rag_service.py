@@ -125,24 +125,28 @@ class CrossEncoderReranker:
             return []
 
         def compute_true_score(cand: Dict[str, Any], raw_rerank_s: Optional[float] = None) -> float:
-            """Computes real relevance percentage without artificial score inflation."""
-            if raw_rerank_s is not None:
-                if 0.0 <= raw_rerank_s <= 1.0:
-                    return round(raw_rerank_s, 3)
-                prob = float(1.0 / (1.0 + np.exp(-float(raw_rerank_s))))
+            """Computes real relevance percentage without 50% baseline artifacts."""
+            d_s = float(cand.get("dense_score", 0.0))
+
+            if raw_rerank_s is not None and float(raw_rerank_s) != 0.0:
+                val = float(raw_rerank_s)
+                if 0.05 < val <= 1.0:
+                    return round(val, 3)
+                prob = float(1.0 / (1.0 + np.exp(-val)))
+                if val <= 0:
+                    prob = max(0.05, prob * 0.4)
                 return round(min(0.99, max(0.05, prob)), 3)
 
-            # Use true dense vector cosine similarity if available
-            d_s = float(cand.get("dense_score", 0.0))
+            # Use true dense vector cosine similarity
             if d_s > 0.0:
                 return round(min(0.99, max(0.05, d_s)), 3)
 
             # BM25 keyword score fallback
             bm25_s = float(cand.get("bm25_score", 0.0))
             if bm25_s > 0.0:
-                return round(min(0.80, max(0.15, bm25_s / 30.0)), 3)
+                return round(min(0.80, max(0.10, bm25_s / 40.0)), 3)
 
-            return 0.10
+            return 0.12
 
         # FastPath 1: FastEmbed ONNX TextReRanker (<50MB RAM)
         if self.fast_reranker:
