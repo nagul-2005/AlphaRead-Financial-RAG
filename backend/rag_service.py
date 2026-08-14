@@ -125,28 +125,33 @@ class CrossEncoderReranker:
             return []
 
         def compute_true_score(cand: Dict[str, Any], raw_rerank_s: Optional[float] = None) -> float:
-            """Computes real relevance percentage without 50% baseline artifacts."""
+            """
+            Computes exact relevance match score using BGE CrossEncoder logit calibration.
+            BGE decision threshold center is ~ 2.0.
+            - Unrelated queries (raw logit ~ 0.0 or negative) -> < 15% match.
+            - Highly relevant queries (raw logit ~ +4.0) -> > 85% match.
+            """
             d_s = float(cand.get("dense_score", 0.0))
 
             if raw_rerank_s is not None and float(raw_rerank_s) != 0.0:
                 val = float(raw_rerank_s)
                 if 0.05 < val <= 1.0:
                     return round(val, 3)
-                prob = float(1.0 / (1.0 + np.exp(-val)))
-                if val <= 0:
-                    prob = max(0.05, prob * 0.4)
-                return round(min(0.99, max(0.05, prob)), 3)
+                # Calibrated logit shift: val - 2.0
+                calibrated_val = val - 2.0
+                prob = float(1.0 / (1.0 + np.exp(-calibrated_val)))
+                return round(min(0.99, max(0.02, prob)), 3)
 
             # Use true dense vector cosine similarity
             if d_s > 0.0:
-                return round(min(0.99, max(0.05, d_s)), 3)
+                return round(min(0.99, max(0.02, d_s)), 3)
 
             # BM25 keyword score fallback
             bm25_s = float(cand.get("bm25_score", 0.0))
             if bm25_s > 0.0:
-                return round(min(0.80, max(0.10, bm25_s / 40.0)), 3)
+                return round(min(0.75, max(0.05, bm25_s / 50.0)), 3)
 
-            return 0.12
+            return 0.05
 
         # FastPath 1: FastEmbed ONNX TextReRanker (<50MB RAM)
         if self.fast_reranker:
@@ -530,19 +535,30 @@ class RAGEngine:
     def chat(self, query: str) -> Dict[str, Any]:
         """
         Main RAG Chat Pipeline:
-        Hybrid Search (BM25+Dense RRF) -> Cross-Encoder Reranker -> Groq Llama-3 Reasoning
+        Hybrid Search (BM25+Dense RRF) -> Cross-Encoder Reranker -> Relevance Filtering -> Groq Llama-3
         """
-        chunks = self.retrieve(query, top_k=TOP_K_RERANKED)
+        raw_chunks = self.retrieve(query, top_k=TOP_K_RERANKED)
         
-        if not chunks:
+        if not raw_chunks:
             return {
                 "answer": "No financial documents have been ingested yet. Please upload a PDF report or fetch an SEC 10-K ticker from the left panel to begin analyzing.",
                 "citations": []
             }
             
+        # Filter chunks to keep only relevant context (relevance_score >= 0.35)
+        RELEVANCE_THRESHOLD = 0.35
+        relevant_chunks = [c for c in raw_chunks if c.get("relevance_score", 0.0) >= RELEVANCE_THRESHOLD]
+        
+        if not relevant_chunks:
+            logger.info(f"All retrieved chunks fell below relevance threshold ({RELEVANCE_THRESHOLD}) for query '{query}'.")
+            return {
+                "answer": f"The provided documents do not contain relevant information to answer your question: '{query}'. Please upload a document containing details on this topic.",
+                "citations": []
+            }
+            
         context_blocks = []
         citations = []
-        for idx, item in enumerate(chunks, 1):
+        for idx, item in enumerate(relevant_chunks, 1):
             rel_score = item.get("relevance_score", 0.85)
             context_blocks.append(f"[Source {idx} - {item['source']} (Relevance: {rel_score})]:\n{item['content']}")
             citations.append({
