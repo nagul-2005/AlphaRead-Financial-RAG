@@ -155,7 +155,7 @@ def fetch_sec_10k(ticker: str, requested_sections: Optional[List[str]] = None) -
         if sec_text and sec_text.strip():
             sections_data.append({
                 "section_name": section_labels.get(sec_key, sec_key),
-                "text": sec_text[:25000],
+                "text": sec_text[:5000],
                 "source": f"{ticker_upper}_10K_{section_labels.get(sec_key, sec_key)}"
             })
         else:
