@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 from typing import List, Dict, Any, Optional
@@ -7,6 +8,7 @@ from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import numpy as np
 from groq import Groq
+from rank_bm25 import BM25Okapi
 
 # Explicitly load .env file from backend folder
 env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -14,6 +16,9 @@ load_dotenv(dotenv_path=env_path)
 load_dotenv()  # Fallback search
 
 logger = logging.getLogger(__name__)
+
+# Configurable RERANKED Top-K candidate count for LLM context
+TOP_K_RERANKED = int(os.getenv("TOP_K_RERANKED", "3"))
 
 # HuggingFace Embeddings loader using fastembed (ONNX runtime, <60MB RAM) with sentence-transformers fallback
 class HuggingFaceEmbeddingFunction:
@@ -41,7 +46,6 @@ class HuggingFaceEmbeddingFunction:
         elif self.st_model:
             return self.st_model.encode(texts, convert_to_numpy=True)
         else:
-            # Deterministic hash embedding fallback if no ML engine loaded
             logger.warning("Using basic hash embedding fallback.")
             vectors = []
             for t in texts:
@@ -49,7 +53,104 @@ class HuggingFaceEmbeddingFunction:
                 vectors.append(np.random.randn(384).astype(np.float32))
             return np.array(vectors, dtype=np.float32)
 
-# Pure-Python Persistent Vector Store (Used when Windows AppControl blocks gRPC/ChromaDB DLLs)
+# BM25 Keyword Search Index Manager
+class BM25IndexManager:
+    def __init__(self):
+        self.documents: List[Dict[str, Any]] = []
+        self.bm25: Optional[BM25Okapi] = None
+
+    def _tokenize(self, text: str) -> List[str]:
+        return re.findall(r'\w+', text.lower())
+
+    def rebuild_index(self, documents: List[Dict[str, Any]]):
+        self.documents = documents
+        if not documents:
+            self.bm25 = None
+            return
+
+        corpus = [self._tokenize(doc["content"]) for doc in documents]
+        self.bm25 = BM25Okapi(corpus)
+        logger.info(f"BM25 index built with {len(documents)} document chunks.")
+
+    def search(self, query: str, top_k: int = 20) -> List[Dict[str, Any]]:
+        if not self.bm25 or not self.documents:
+            return []
+
+        tokenized_query = self._tokenize(query)
+        if not tokenized_query:
+            return []
+
+        scores = self.bm25.get_scores(tokenized_query)
+        top_indices = np.argsort(scores)[::-1][:min(top_k, len(self.documents))]
+
+        results = []
+        for idx in top_indices:
+            score = float(scores[idx])
+            if score > 0:
+                doc_copy = dict(self.documents[idx])
+                doc_copy["bm25_score"] = score
+                results.append(doc_copy)
+
+        return results
+
+# Cross-Encoder Reranker Manager
+class CrossEncoderReranker:
+    def __init__(self, model_name: str = "BAAI/bge-reranker-base"):
+        self.model_name = model_name
+        self.reranker = None
+        self._load_model()
+
+    def _load_model(self):
+        try:
+            from sentence_transformers import CrossEncoder
+            logger.info(f"Loading CrossEncoder reranker model '{self.model_name}'...")
+            self.reranker = CrossEncoder(self.model_name, max_length=512)
+            logger.info(f"CrossEncoder model '{self.model_name}' loaded successfully.")
+        except Exception as e:
+            logger.warning(f"Could not load '{self.model_name}' ({e}). Trying fallback reranker 'cross-encoder/ms-marco-MiniLM-L-6-v2'...")
+            try:
+                from sentence_transformers import CrossEncoder
+                self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+                logger.info("Fallback CrossEncoder loaded successfully.")
+            except Exception as e2:
+                logger.error(f"CrossEncoder reranker init failed ({e2}). Reranker will operate in pass-through mode.")
+
+    def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = TOP_K_RERANKED) -> List[Dict[str, Any]]:
+        if not candidates:
+            return []
+
+        if not self.reranker:
+            # Fallback: pass-through candidates if CrossEncoder unavailable
+            for c in candidates:
+                c["relevance_score"] = c.get("rrf_score", 0.5)
+            return candidates[:top_k]
+
+        pairs = [(query, c["content"]) for c in candidates]
+        try:
+            scores = self.reranker.predict(pairs)
+            if isinstance(scores, (int, float)):
+                scores = [scores]
+            
+            # Apply sigmoid transformation to map logits to 0.0 - 1.0 probability
+            sigmoid_scores = [float(1.0 / (1.0 + np.exp(-s))) for s in scores]
+
+            scored_candidates = []
+            for candidate, score in zip(candidates, sigmoid_scores):
+                c_copy = dict(candidate)
+                c_copy["reranker_score"] = round(score, 3)
+                c_copy["relevance_score"] = round(score, 3)
+                scored_candidates.append(c_copy)
+
+            # Sort by reranker score descending
+            scored_candidates.sort(key=lambda x: x["reranker_score"], reverse=True)
+            return scored_candidates[:min(top_k, len(scored_candidates))]
+        except Exception as e:
+            logger.error(f"Error during CrossEncoder reranking: {e}")
+            for c in candidates:
+                c["relevance_score"] = c.get("rrf_score", 0.5)
+            return candidates[:top_k]
+
+# Pure-Python Persistent Vector Store
 class LocalVectorStore:
     def __init__(self, persist_dir: str = "./vector_store"):
         self.persist_dir = persist_dir
@@ -97,16 +198,14 @@ class LocalVectorStore:
             self.embeddings = np.vstack([self.embeddings, embeddings_arr])
         self._save()
 
-    def query(self, query_emb: np.ndarray, top_k: int = 3) -> Dict[str, Any]:
+    def query(self, query_emb: np.ndarray, top_k: int = 20) -> Dict[str, Any]:
         if len(self.documents) == 0 or len(self.embeddings) == 0:
             return {"documents": [[]], "metadatas": [[]], "distances": [[]]}
 
-        # Compute cosine similarity
         norm_query = query_emb / (np.linalg.norm(query_emb) + 1e-10)
         norm_emb = self.embeddings / (np.linalg.norm(self.embeddings, axis=1, keepdims=True) + 1e-10)
         similarities = np.dot(norm_emb, norm_query.T).flatten()
         
-        # Top-k indices
         top_indices = np.argsort(similarities)[::-1][:min(top_k, len(self.documents))]
         
         res_docs = [self.documents[i] for i in top_indices]
@@ -119,7 +218,6 @@ class LocalVectorStore:
         return len(self.documents)
 
     def delete_document(self, source_name: str) -> int:
-        """Deletes all chunks matching source_name."""
         indices_to_keep = []
         deleted_count = 0
         for i, meta in enumerate(self.metadatas):
@@ -148,12 +246,28 @@ class LocalVectorStore:
         if os.path.exists(self.store_file):
             os.remove(self.store_file)
 
+    def get_all_chunks(self) -> List[Dict[str, Any]]:
+        chunks = []
+        for doc, meta, cid in zip(self.documents, self.metadatas, self.ids):
+            chunks.append({
+                "id": cid,
+                "content": doc,
+                "metadata": meta,
+                "source": meta.get("source", "Unknown"),
+                "page": meta.get("page_number", meta.get("section", "N/A")),
+                "ticker": meta.get("ticker", "N/A"),
+                "chunk_index": meta.get("chunk_index", 0)
+            })
+        return chunks
+
 class RAGEngine:
     def __init__(self, persist_directory: str = "./chroma_db"):
         self.persist_directory = persist_directory
         self.embedding_fn = HuggingFaceEmbeddingFunction("all-MiniLM-L6-v2")
+        self.bm25_manager = BM25IndexManager()
+        self.reranker_manager = CrossEncoderReranker("BAAI/bge-reranker-base")
         
-        # Try initializing ChromaDB; fallback to LocalVectorStore if Windows AppControl blocks gRPC DLL
+        # Try initializing ChromaDB; fallback to LocalVectorStore
         self.use_chroma = False
         self.chroma_client = None
         self.collection = None
@@ -172,14 +286,12 @@ class RAGEngine:
             logger.warning(f"ChromaDB initialization bypassed ({e}). Operating via high-performance Local Vector Engine.")
             self.local_store = LocalVectorStore(persist_dir="./vector_store")
 
-        # Initialize LangChain text splitter (chunk_size=1000, chunk_overlap=200)
         self.text_splitter = RecursiveCharacterTextSplitter(
             chunk_size=1000,
             chunk_overlap=200,
             separators=["\n\n", "\n", ". ", " ", ""]
         )
         
-        # Initialize Groq client
         self.groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
         self.groq_client = None
         if self.groq_api_key:
@@ -188,6 +300,37 @@ class RAGEngine:
                 logger.info("Groq API client initialized successfully.")
             except Exception as e:
                 logger.warning(f"Could not initialize Groq client: {e}")
+
+        # Synchronize BM25 index with existing store documents
+        self._sync_bm25_index()
+
+    def _sync_bm25_index(self):
+        """Builds BM25 index over all stored document chunks."""
+        all_chunks = self._get_all_stored_chunks()
+        self.bm25_manager.rebuild_index(all_chunks)
+
+    def _get_all_stored_chunks(self) -> List[Dict[str, Any]]:
+        chunks = []
+        if self.use_chroma and self.collection:
+            count = self.collection.count()
+            if count > 0:
+                data = self.collection.get(include=["documents", "metadatas"])
+                docs = data.get("documents", [])
+                metas = data.get("metadatas", [])
+                ids = data.get("ids", [])
+                for cid, d, m in zip(ids, docs, metas):
+                    chunks.append({
+                        "id": cid,
+                        "content": d,
+                        "metadata": m,
+                        "source": m.get("source", "Unknown"),
+                        "page": m.get("page_number", m.get("section", "N/A")),
+                        "ticker": m.get("ticker", "N/A"),
+                        "chunk_index": m.get("chunk_index", 0)
+                    })
+        elif self.local_store:
+            chunks = self.local_store.get_all_chunks()
+        return chunks
 
     def ingest_text(self, text: str, source_name: str, metadata: Optional[Dict[str, Any]] = None) -> int:
         if not text or not text.strip():
@@ -216,7 +359,6 @@ class RAGEngine:
             metadatas.append(chunk_meta)
             ids.append(chunk_id)
             
-        # Generate embeddings
         embeddings_np = self.embedding_fn.encode(documents)
         
         if self.use_chroma and self.collection:
@@ -232,10 +374,13 @@ class RAGEngine:
         else:
             self.local_store.add(documents, metadatas, ids, embeddings_np)
             
+        # Re-sync BM25 index with new chunks
+        self._sync_bm25_index()
         logger.info(f"Ingested {len(chunks)} chunks into vector store for '{source_name}'.")
         return len(chunks)
 
-    def retrieve(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+    def dense_retrieve(self, query: str, top_k: int = 20) -> List[Dict[str, Any]]:
+        """Dense Vector Retrieval using ChromaDB or LocalVectorStore."""
         count = self.collection.count() if self.use_chroma else self.local_store.count()
         if count == 0:
             return []
@@ -262,20 +407,79 @@ class RAGEngine:
                 meta = metas[idx] if idx < len(metas) else {}
                 dist = distances[idx] if idx < len(distances) else 0.5
                 similarity = round(max(0.0, 1.0 - float(dist)), 3)
+                chunk_id = meta.get("chunk_id", f"{meta.get('source', 'doc')}_chunk_{meta.get('chunk_index', idx)}")
                 
                 retrieved_chunks.append({
+                    "id": chunk_id,
                     "content": doc_text,
                     "source": meta.get("source", "Financial Document"),
                     "page": meta.get("page_number", meta.get("section", "N/A")),
                     "ticker": meta.get("ticker", "N/A"),
                     "chunk_index": meta.get("chunk_index", idx),
-                    "relevance_score": similarity
+                    "dense_score": similarity
                 })
                 
         return retrieved_chunks
 
+    def hybrid_retrieve(self, query: str, top_candidates: int = 20, rrf_k: int = 60) -> List[Dict[str, Any]]:
+        """
+        1. HYBRID SEARCH: Combines Dense (ChromaDB) + Sparse (BM25) candidates using Reciprocal Rank Fusion (RRF).
+        RRF(d) = sum( 1 / (rrf_k + rank_m(d)) )
+        """
+        dense_results = self.dense_retrieve(query, top_k=top_candidates)
+        bm25_results = self.bm25_manager.search(query, top_k=top_candidates)
+
+        if not dense_results and not bm25_results:
+            return []
+
+        rrf_scores: Dict[str, float] = {}
+        doc_map: Dict[str, Dict[str, Any]] = {}
+
+        # Process Dense Ranks
+        for rank, item in enumerate(dense_results, start=1):
+            doc_id = item.get("id") or f"{item['source']}_{item['chunk_index']}_{hash(item['content'])}"
+            doc_map[doc_id] = item
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + (1.0 / (rrf_k + rank))
+
+        # Process BM25 Ranks
+        for rank, item in enumerate(bm25_results, start=1):
+            doc_id = item.get("id") or f"{item['source']}_{item['chunk_index']}_{hash(item['content'])}"
+            if doc_id not in doc_map:
+                doc_map[doc_id] = item
+            rrf_scores[doc_id] = rrf_scores.get(doc_id, 0.0) + (1.0 / (rrf_k + rank))
+
+        # Sort candidates by RRF score
+        sorted_ids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
+
+        hybrid_candidates = []
+        for doc_id in sorted_ids[:top_candidates]:
+            candidate = dict(doc_map[doc_id])
+            candidate["rrf_score"] = round(rrf_scores[doc_id], 4)
+            hybrid_candidates.append(candidate)
+
+        logger.info(f"Hybrid retrieval generated {len(hybrid_candidates)} candidates using RRF.")
+        return hybrid_candidates
+
+    def retrieve(self, query: str, top_k: int = TOP_K_RERANKED) -> List[Dict[str, Any]]:
+        """
+        Combined Multi-Stage Pipeline:
+        1. Hybrid Search (Dense + BM25 via RRF) -> Top 20 Candidates
+        2. Cross-Encoder Reranking (bge-reranker-base) -> Top top_k Candidates
+        """
+        hybrid_candidates = self.hybrid_retrieve(query, top_candidates=20, rrf_k=60)
+        if not hybrid_candidates:
+            return []
+
+        # Step 2: Cross-Encoder Reranking
+        reranked_results = self.reranker_manager.rerank(query, hybrid_candidates, top_k=top_k)
+        return reranked_results
+
     def chat(self, query: str) -> Dict[str, Any]:
-        chunks = self.retrieve(query, top_k=3)
+        """
+        Main RAG Chat Pipeline:
+        Hybrid Search (BM25+Dense RRF) -> Cross-Encoder Reranker -> Groq Llama-3 Reasoning
+        """
+        chunks = self.retrieve(query, top_k=TOP_K_RERANKED)
         
         if not chunks:
             return {
@@ -286,13 +490,14 @@ class RAGEngine:
         context_blocks = []
         citations = []
         for idx, item in enumerate(chunks, 1):
-            context_blocks.append(f"[Source {idx} - {item['source']} (Relevance: {item['relevance_score']})]:\n{item['content']}")
+            rel_score = item.get("relevance_score", 0.85)
+            context_blocks.append(f"[Source {idx} - {item['source']} (Relevance: {rel_score})]:\n{item['content']}")
             citations.append({
                 "source_id": idx,
                 "document": item["source"],
                 "section_or_page": str(item["page"]),
                 "snippet": item["content"],
-                "relevance_score": item["relevance_score"]
+                "relevance_score": rel_score
             })
             
         formatted_context = "\n\n".join(context_blocks)
@@ -312,7 +517,6 @@ class RAGEngine:
         answer = ""
         groq_error_msg = ""
         
-        # Check and initialize Groq client if key exists
         api_key = os.getenv("GROQ_API_KEY", "").strip()
         if not self.groq_client and api_key:
             try:
@@ -354,7 +558,8 @@ class RAGEngine:
             
         return {
             "answer": answer,
-            "citations": citations
+            "citations": citations,
+            "retrieval_method": "Hybrid Search (BM25 + Dense RRF) + BGE Cross-Encoder Reranking"
         }
 
     def _generate_fallback_answer(self, query: str, chunks: List[Dict[str, Any]], groq_error: str = "") -> str:
@@ -407,20 +612,24 @@ class RAGEngine:
         return list(docs_map.values())
 
     def delete_document(self, source_name: str) -> bool:
-        """Deletes vector embeddings for a specific source document."""
+        """Deletes vector embeddings for a specific source document and syncs BM25 index."""
+        deleted = False
         if self.use_chroma and self.collection:
             try:
                 self.collection.delete(where={"source": source_name})
                 logger.info(f"Deleted ChromaDB vectors for source '{source_name}'.")
-                return True
+                deleted = True
             except Exception as e:
                 logger.error(f"Error deleting ChromaDB source '{source_name}': {e}")
-                return False
+                deleted = False
         elif self.local_store:
             deleted_count = self.local_store.delete_document(source_name)
             logger.info(f"Deleted {deleted_count} chunks from local store for '{source_name}'.")
-            return deleted_count > 0
-        return False
+            deleted = deleted_count > 0
+
+        if deleted:
+            self._sync_bm25_index()
+        return deleted
 
     def clear_database(self):
         if self.use_chroma:
@@ -431,6 +640,8 @@ class RAGEngine:
             )
         else:
             self.local_store.clear()
+            
+        self._sync_bm25_index()
 
 # Global singleton RAG engine instance
 rag_engine = RAGEngine()
