@@ -615,7 +615,7 @@ class RAGEngine:
             "- Bold all raw numbers, currency denominations, and percentage growth rates (e.g., **$24,632 million**, **+12%**).\n"
             "- Cite the exact Item or Section metadata tag attached to the context block (e.g., [Source 1 - Item 7]) for every fact provided.\n"
             "- If the answer cannot be determined with exact numeric precision from the provided chunks, output: 'The context confirms the existence of this section, but the exact numeric data was cut off or missing from the retrieval pipeline.\n'"
-            "- Analyse those tables and give a readable numericals with text. Don't just give the table as it is and don't use '*' and '| :--- | :---: | :---: | :---: |'"
+            "- Analyse those tables and give a readable numericals with text. Don't just give the table as it is and use '-' symbol instead of using '**' and '| :--- | :---: | :---: | :---: |'"
         )
         
         user_prompt = f"FINANCIAL DOCUMENT CONTEXT:\n{formatted_context}\n\nUSER QUESTION: {query}"
