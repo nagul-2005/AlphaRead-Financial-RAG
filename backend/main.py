@@ -71,7 +71,7 @@ def health_check():
     return {
         "status": "online",
         "app": "AlphaRead Financial GenAI",
-        "groq_configured": bool(rag_engine.groq_client)
+        "gemini_configured": bool(rag_engine.gemini_api_key)
     }
 
 @app.post("/upload")

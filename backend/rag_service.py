@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import numpy as np
-from groq import Groq
+import requests
 from rank_bm25 import BM25Okapi
 from relevance import calibrate_bge_reranker_score, fastembed_relevance_score
 
@@ -370,14 +370,12 @@ class RAGEngine:
             separators=["\n\n", "\n", ". ", " ", ""]
         )
         
-        self.groq_api_key = os.getenv("GROQ_API_KEY", "").strip()
-        self.groq_client = None
-        if self.groq_api_key:
-            try:
-                self.groq_client = Groq(api_key=self.groq_api_key)
-                logger.info("Groq API client initialized successfully.")
-            except Exception as e:
-                logger.warning(f"Could not initialize Groq client: {e}")
+        self.gemini_api_key = (
+            os.getenv("GEMINI_API_KEY") or 
+            os.getenv("GOOGLE_API_KEY") or 
+            "AIzaSyDgDZgAZk3ufApEbB2hbPUq8qaPf66mQco"
+        ).strip()
+        logger.info("Gemini API key configured.")
 
         # Synchronize BM25 index with existing store documents
         self._sync_bm25_index()
@@ -620,50 +618,107 @@ class RAGEngine:
         
         user_prompt = f"FINANCIAL DOCUMENT CONTEXT:\n{formatted_context}\n\nUSER QUESTION: {query}"
         
-        answer = ""
-        groq_error_msg = ""
-        
-        api_key = os.getenv("GROQ_API_KEY", "").strip()
-        if not self.groq_client and api_key:
-            try:
-                self.groq_client = Groq(api_key=api_key)
-                logger.info("Groq client dynamically initialized.")
-            except Exception as e:
-                groq_error_msg = f"Groq client init error: {e}"
-                logger.error(groq_error_msg)
-
-        if self.groq_client:
-            models_to_try = [
-                "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant"
-            ]
-            for model_name in models_to_try:
-                try:
-                    logger.info(f"Invoking Groq LLM API model '{model_name}'...")
-                    response = self.groq_client.chat.completions.create(
-                        model=model_name,
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        temperature=0.2,
-                        max_tokens=1024
-                    )
-                    answer = response.choices[0].message.content
-                    logger.info(f"Groq API call succeeded using model '{model_name}'.")
-                    break
-                except Exception as e:
-                    groq_error_msg = f"Groq API error on model '{model_name}': {e}"
-                    logger.error(groq_error_msg)
+        answer, gemini_error_msg = self._call_gemini_api(system_prompt, user_prompt)
 
         if not answer:
-            answer = self._generate_fallback_answer(query, relevant_chunks, groq_error_msg)
+            answer = self._generate_fallback_answer(query, relevant_chunks, gemini_error_msg)
             
         return {
             "answer": answer,
             "citations": citations,
             "retrieval_method": "Hybrid Search (BM25 + Dense RRF) + BGE Cross-Encoder Reranking"
         }
+
+    def _call_gemini_api(self, system_prompt: str, user_prompt: str) -> tuple[str, str]:
+        """
+        Invokes Google Gemini API using GEMINI_API_KEY.
+        Supports google-genai SDK, google.generativeai, and direct REST API fallback.
+        """
+        api_key = (
+            os.getenv("GEMINI_API_KEY") or 
+            os.getenv("GOOGLE_API_KEY") or 
+            "AIzaSyDgDZgAZk3ufApEbB2hbPUq8qaPf66mQco"
+        ).strip()
+
+        if not api_key:
+            return "", "Gemini API key is not configured."
+
+        models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+        last_error = ""
+        full_prompt = f"{system_prompt}\n\n{user_prompt}"
+
+        # Strategy 1: google-genai SDK (recommended official SDK)
+        try:
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            for model_name in models_to_try:
+                try:
+                    logger.info(f"Invoking Gemini API via google-genai SDK ('{model_name}')...")
+                    res = client.models.generate_content(
+                        model=model_name,
+                        contents=full_prompt
+                    )
+                    if res and res.text:
+                        logger.info(f"Gemini API call succeeded using model '{model_name}'.")
+                        return res.text, ""
+                except Exception as e:
+                    last_error = f"google-genai error ({model_name}): {e}"
+                    logger.warning(last_error)
+        except ImportError:
+            pass
+
+        # Strategy 2: google.generativeai SDK
+        try:
+            import google.generativeai as genai_old
+            genai_old.configure(api_key=api_key)
+            for model_name in models_to_try:
+                try:
+                    logger.info(f"Invoking Gemini API via google.generativeai ('{model_name}')...")
+                    m = genai_old.GenerativeModel(model_name)
+                    res = m.generate_content(full_prompt)
+                    if res and res.text:
+                        logger.info(f"Gemini API call succeeded using model '{model_name}'.")
+                        return res.text, ""
+                except Exception as e:
+                    last_error = f"google.generativeai error ({model_name}): {e}"
+                    logger.warning(last_error)
+        except ImportError:
+            pass
+
+        # Strategy 3: Direct HTTP REST API via requests (Zero dependency fallback)
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "contents": [
+                {
+                    "parts": [{"text": full_prompt}]
+                }
+            ],
+            "generationConfig": {
+                "temperature": 0.2,
+                "maxOutputTokens": 1024
+            }
+        }
+        for model_name in models_to_try:
+            try:
+                logger.info(f"Invoking Gemini API via direct REST API ('{model_name}')...")
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+                res = requests.post(url, headers=headers, json=payload, timeout=12)
+                if res.status_code == 200:
+                    data = res.json()
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0]:
+                        parts = candidates[0]["content"].get("parts", [])
+                        if parts and "text" in parts[0]:
+                            logger.info(f"Gemini REST API call succeeded using model '{model_name}'.")
+                            return parts[0]["text"], ""
+                else:
+                    last_error = f"Gemini REST API ({model_name}) HTTP {res.status_code}: {res.text[:200]}"
+                    logger.warning(last_error)
+            except Exception as e:
+                last_error = f"Gemini REST API error ({model_name}): {e}"
+                logger.warning(last_error)
+
+        return "", last_error
 
     def _generate_fallback_answer(self, query: str, chunks: List[Dict[str, Any]], groq_error: str = "") -> str:
         sources_used = ", ".join(list(set(c["source"] for c in chunks)))
