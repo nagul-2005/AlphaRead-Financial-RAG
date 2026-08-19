@@ -635,9 +635,7 @@ class RAGEngine:
         if self.groq_client:
             models_to_try = [
                 "llama-3.3-70b-versatile",
-                "llama-3.1-8b-instant",
-                "qwen-2.5-coder-32b",
-                "deepseek-r1-distill-llama-70b"
+                "llama-3.1-8b-instant"
             ]
             for model_name in models_to_try:
                 try:
