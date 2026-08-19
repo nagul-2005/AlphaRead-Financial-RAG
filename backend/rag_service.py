@@ -660,7 +660,7 @@ class RAGEngine:
                     logger.error(groq_error_msg)
 
         if not answer:
-            answer = self._generate_fallback_answer(query, chunks, groq_error_msg)
+            answer = self._generate_fallback_answer(query, relevant_chunks, groq_error_msg)
             
         return {
             "answer": answer,
