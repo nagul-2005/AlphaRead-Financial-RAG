@@ -373,9 +373,10 @@ class RAGEngine:
         self.gemini_api_key = (
             os.getenv("GEMINI_API_KEY") or 
             os.getenv("GOOGLE_API_KEY") or 
-            "AIzaSyDgDZgAZk3ufApEbB2hbPUq8qaPf66mQco"
+            ""
         ).strip()
-        logger.info("Gemini API key configured.")
+        if self.gemini_api_key:
+            logger.info("Gemini API key configured from environment.")
 
         # Synchronize BM25 index with existing store documents
         self._sync_bm25_index()
@@ -637,7 +638,7 @@ class RAGEngine:
         api_key = (
             os.getenv("GEMINI_API_KEY") or 
             os.getenv("GOOGLE_API_KEY") or 
-            "AIzaSyDgDZgAZk3ufApEbB2hbPUq8qaPf66mQco"
+            ""
         ).strip()
 
         if not api_key:
