@@ -619,10 +619,27 @@ class RAGEngine:
         
         user_prompt = f"FINANCIAL DOCUMENT CONTEXT:\n{formatted_context}\n\nUSER QUESTION: {query}"
         
-        answer, gemini_error_msg = self._call_gemini_api(system_prompt, user_prompt)
+        answer = ""
+        llm_errors = []
 
+        # 1. Primary LLM: Google Gemini API (gemini-2.5-flash)
+        gemini_key = (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
+        if gemini_key:
+            answer, gem_err = self._call_gemini_api(system_prompt, user_prompt, gemini_key)
+            if not answer and gem_err:
+                llm_errors.append(f"Gemini: {gem_err}")
+
+        # 2. Secondary LLM: Groq API (llama-3.3-70b-versatile) fallback
+        groq_key = os.getenv("GROQ_API_KEY", "").strip()
+        if not answer and groq_key:
+            answer, groq_err = self._call_groq_api(system_prompt, user_prompt, groq_key)
+            if not answer and groq_err:
+                llm_errors.append(f"Groq: {groq_err}")
+
+        # 3. Fallback: Structured retrieval summary if LLM calls bypass/fail
         if not answer:
-            answer = self._generate_fallback_answer(query, relevant_chunks, gemini_error_msg)
+            err_msg = " | ".join(llm_errors) if llm_errors else ""
+            answer = self._generate_fallback_answer(query, relevant_chunks, err_msg)
             
         return {
             "answer": answer,
@@ -630,19 +647,13 @@ class RAGEngine:
             "retrieval_method": "Hybrid Search (BM25 + Dense RRF) + BGE Cross-Encoder Reranking"
         }
 
-    def _call_gemini_api(self, system_prompt: str, user_prompt: str) -> tuple[str, str]:
+    def _call_gemini_api(self, system_prompt: str, user_prompt: str, api_key: str) -> tuple[str, str]:
         """
         Invokes Google Gemini API using GEMINI_API_KEY.
         Supports google-genai SDK, google.generativeai, and direct REST API fallback.
         """
-        api_key = (
-            os.getenv("GEMINI_API_KEY") or 
-            os.getenv("GOOGLE_API_KEY") or 
-            ""
-        ).strip()
-
         if not api_key:
-            return "", "Gemini API key is not configured."
+            return "", "Gemini API key is missing."
 
         models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
         last_error = ""
@@ -721,7 +732,39 @@ class RAGEngine:
 
         return "", last_error
 
-    def _generate_fallback_answer(self, query: str, chunks: List[Dict[str, Any]], groq_error: str = "") -> str:
+    def _call_groq_api(self, system_prompt: str, user_prompt: str, api_key: str) -> tuple[str, str]:
+        """Invokes Groq API using GROQ_API_KEY with model fallback."""
+        if not api_key:
+            return "", "Groq API key is missing."
+
+        try:
+            from groq import Groq
+            client = Groq(api_key=api_key)
+            models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+            last_err = ""
+            for model_name in models:
+                try:
+                    logger.info(f"Invoking Groq LLM API model '{model_name}'...")
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.2,
+                        max_tokens=1024
+                    )
+                    if response and response.choices and response.choices[0].message.content:
+                        logger.info(f"Groq API call succeeded using model '{model_name}'.")
+                        return response.choices[0].message.content, ""
+                except Exception as e:
+                    last_err = f"Groq error ({model_name}): {e}"
+                    logger.warning(last_err)
+            return "", last_err
+        except Exception as e:
+            return "", f"Groq client init error: {e}"
+
+    def _generate_fallback_answer(self, query: str, chunks: List[Dict[str, Any]], error_details: str = "") -> str:
         sources_used = ", ".join(list(set(c["source"] for c in chunks)))
         
         summary = (
@@ -734,14 +777,8 @@ class RAGEngine:
                 text_preview = text_preview[:350] + "..."
             summary += f"**Key Insight {idx} (from {chunk['source']})**: {text_preview}\n\n"
             
-        api_key_present = bool(os.getenv("GROQ_API_KEY", "").strip())
-        if api_key_present:
-            if groq_error:
-                summary += f"\n*⚠️ Groq API key is set, but returned an error: `{groq_error}`*"
-            else:
-                summary += "\n*⚠️ Groq API key is set, but client connection could not be established.*"
-        else:
-            summary += "\n*Note: To enable direct Llama-3 generative responses via Groq, add your `GROQ_API_KEY` to environment variables.*"
+        if error_details:
+            summary += f"\n*⚠️ LLM API Notice: `{error_details}`*"
             
         return summary
 
