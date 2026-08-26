@@ -28,26 +28,18 @@ class HuggingFaceEmbeddingFunction:
     def __init__(self, model_name: str = "BAAI/bge-small-en-v1.5"):
         logger.info(f"Loading embedding engine for '{model_name}'...")
         self.fast_model = None
-        self.st_model = None
         
         try:
             from fastembed import TextEmbedding
             self.fast_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
             logger.info("FastEmbed ONNX lightweight embedding engine initialized (<60MB RAM).")
         except Exception as e:
-            logger.warning(f"FastEmbed init failed ({e}). Trying sentence-transformers fallback...")
-            try:
-                from sentence_transformers import SentenceTransformer
-                self.st_model = SentenceTransformer("all-MiniLM-L6-v2")
-            except Exception as fallback_err:
-                logger.error(f"SentenceTransformer fallback failed: {fallback_err}")
+            logger.warning(f"FastEmbed init failed ({e}). Operating via lightweight vector fallback.")
 
     def encode(self, texts: List[str]) -> np.ndarray:
         if self.fast_model:
             embeddings_generator = self.fast_model.embed(texts)
             return np.array(list(embeddings_generator), dtype=np.float32)
-        elif self.st_model:
-            return self.st_model.encode(texts, convert_to_numpy=True)
         else:
             logger.warning("Using basic hash embedding fallback.")
             vectors = []
@@ -111,13 +103,7 @@ class CrossEncoderReranker:
             self.fast_reranker = TextReRanker(model_name="BAAI/bge-reranker-base")
             logger.info("FastEmbed ONNX TextReRanker initialized successfully.")
         except Exception as e:
-            logger.warning(f"FastEmbed TextReRanker init failed ({e}). Trying sentence-transformers fallback...")
-            try:
-                from sentence_transformers import CrossEncoder
-                self.st_reranker = CrossEncoder("BAAI/bge-reranker-base", max_length=512)
-                logger.info("SentenceTransformer CrossEncoder loaded successfully.")
-            except Exception as e2:
-                logger.warning(f"CrossEncoder fallback bypassed ({e2}). Using RRF score ranking.")
+            logger.warning(f"FastEmbed TextReRanker init failed ({e}). Using RRF score ranking.")
 
     def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = TOP_K_RERANKED) -> List[Dict[str, Any]]:
         if not candidates:
@@ -188,36 +174,6 @@ class CrossEncoderReranker:
                 return scored_candidates[:min(top_k, len(scored_candidates))]
             except Exception as e:
                 logger.error(f"Error during FastEmbed reranking: {e}")
-
-        # FastPath 2: SentenceTransformers Fallback
-        if self.st_reranker:
-            try:
-                pairs = [(query, c["content"]) for c in candidates]
-                # CrossEncoder.predict applies sigmoid by default for one-label
-                # models.  Request logits so the BGE calibration below is only
-                # applied once; treating the default output as a percentage was
-                # the source of unrelated 50%+ citation matches.
-                import torch
-                scores = self.st_reranker.predict(
-                    pairs,
-                    activation_fn=torch.nn.Identity(),
-                    show_progress_bar=False
-                )
-                if isinstance(scores, (int, float)):
-                    scores = [scores]
-
-                scored_candidates = []
-                for idx, (candidate, score) in enumerate(zip(candidates, scores)):
-                    final_score = compute_true_score(candidate, raw_rerank_s=float(score))
-                    c_copy = dict(candidate)
-                    c_copy["reranker_score"] = float(score)
-                    c_copy["relevance_score"] = final_score
-                    scored_candidates.append(c_copy)
-
-                scored_candidates.sort(key=lambda x: x["relevance_score"], reverse=True)
-                return scored_candidates[:min(top_k, len(scored_candidates))]
-            except Exception as e:
-                logger.error(f"Error during ST CrossEncoder reranking: {e}")
 
         # Fallback: Preserve true Dense Vector Similarity
         scored_candidates = []
