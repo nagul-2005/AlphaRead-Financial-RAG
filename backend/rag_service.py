@@ -2,15 +2,16 @@ import os
 import re
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dotenv import load_dotenv
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter, TokenTextSplitter
 import numpy as np
 import requests
 from groq import Groq
 from rank_bm25 import BM25Okapi
 from relevance import calibrate_bge_reranker_score, fastembed_relevance_score
+from parallel_ingestion import parallel_pipeline
 
 # Explicitly load .env file from backend folder
 env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -418,26 +419,14 @@ class RAGEngine:
         base_meta = metadata or {}
         base_meta["source"] = source_name
         
-        chunks = self.text_splitter.split_text(text)
-        if not chunks:
+        # Parallel subword token-based chunking (TokenTextSplitter chunk_size=256 ~ 1000 chars)
+        processed_chunks = parallel_pipeline.chunk_texts_parallel([(text, base_meta)])
+        if not processed_chunks:
             return 0
             
-        documents = []
-        metadatas = []
-        ids = []
-        
-        for idx, chunk in enumerate(chunks):
-            chunk_id = f"{source_name}_chunk_{idx}_{hash(chunk) & 0xffffffff}"
-            chunk_meta = {
-                **base_meta,
-                "chunk_id": chunk_id,
-                "chunk_index": idx,
-                "source": source_name,
-                "snippet": chunk[:150] + "..."
-            }
-            documents.append(chunk)
-            metadatas.append(chunk_meta)
-            ids.append(chunk_id)
+        documents = [c["content"] for c in processed_chunks]
+        metadatas = [c["metadata"] for c in processed_chunks]
+        ids = [c["id"] for c in processed_chunks]
             
         embeddings_np = self.embedding_fn.encode(documents)
         
@@ -456,8 +445,42 @@ class RAGEngine:
             
         # Re-sync BM25 index with new chunks
         self._sync_bm25_index()
-        logger.info(f"Ingested {len(chunks)} chunks into vector store for '{source_name}'.")
-        return len(chunks)
+        logger.info(f"Ingested {len(processed_chunks)} token-aligned chunks into vector store for '{source_name}'.")
+        return len(processed_chunks)
+
+    def ingest_batch(self, items: List[Tuple[str, Dict[str, Any]]]) -> int:
+        """
+        Batch Ingestion: Parallel multi-core chunking across multiple files or sections.
+        """
+        if not items:
+            return 0
+
+        processed_chunks = parallel_pipeline.chunk_texts_parallel(items)
+        if not processed_chunks:
+            return 0
+
+        documents = [c["content"] for c in processed_chunks]
+        metadatas = [c["metadata"] for c in processed_chunks]
+        ids = [c["id"] for c in processed_chunks]
+
+        embeddings_np = self.embedding_fn.encode(documents)
+
+        if self.use_chroma and self.collection:
+            embeddings_list = embeddings_np.tolist()
+            batch_size = 100
+            for i in range(0, len(documents), batch_size):
+                self.collection.add(
+                    documents=documents[i:i+batch_size],
+                    embeddings=embeddings_list[i:i+batch_size],
+                    metadatas=metadatas[i:i+batch_size],
+                    ids=ids[i:i+batch_size]
+                )
+        else:
+            self.local_store.add(documents, metadatas, ids, embeddings_np)
+
+        self._sync_bm25_index()
+        logger.info(f"Batch ingested {len(processed_chunks)} token-aligned chunks into vector store.")
+        return len(processed_chunks)
 
     def dense_retrieve(self, query: str, top_k: int = 20) -> List[Dict[str, Any]]:
         """Dense Vector Retrieval using ChromaDB or LocalVectorStore."""

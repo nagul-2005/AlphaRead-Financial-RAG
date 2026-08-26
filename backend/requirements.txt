@@ -3,6 +3,7 @@ uvicorn>=0.28.0
 python-multipart>=0.0.9
 pypdf>=4.0.0
 pdfplumber>=0.10.0
+pymupdf>=1.24.0
 edgartools>=2.0.0
 langchain-text-splitters>=0.0.1
 fastembed>=0.2.0
