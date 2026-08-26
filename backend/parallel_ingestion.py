@@ -33,10 +33,10 @@ def _extract_pdf_page_worker(args: Tuple[bytes, int, str]) -> Tuple[int, str, st
     pdf_bytes, page_num, filename = args
     extracted_text = ""
 
-    # Strategy 1: High-performance C++ PyMuPDF (fitz)
+    # Strategy 1: High-performance C++ PyMuPDF
     try:
-        import fitz
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        import pymupdf
+        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
         if 0 <= page_num - 1 < len(doc):
             extracted_text = doc[page_num - 1].get_text("text") or ""
         doc.close()
@@ -128,8 +128,8 @@ class ParallelIngestionPipeline:
         Extracts text from PDF bytes concurrently across all available CPU cores.
         """
         try:
-            import fitz
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            import pymupdf
+            doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
             total_pages = len(doc)
             doc.close()
         except Exception:
@@ -154,31 +154,33 @@ class ParallelIngestionPipeline:
                 pages_data.append({"page_number": res[0], "text": res[1], "source": filename})
             return pages_data
 
-        # Parallel extraction across ProcessPoolExecutor
-        with ProcessPoolExecutor(max_workers=min(self.num_cores, total_pages)) as executor:
-            future_to_page = {executor.submit(_extract_pdf_page_worker, t): t[1] for t in tasks}
-            for future in as_completed(future_to_page):
-                page_num, text, fname = future.result()
-                if text:
-                    pages_data.append({
-                        "page_number": page_num,
-                        "text": text,
-                        "source": fname
-                    })
+        # Parallel extraction across ProcessPoolExecutor with fail-safe sequential fallback
+        try:
+            with ProcessPoolExecutor(max_workers=min(self.num_cores, total_pages)) as executor:
+                future_to_page = {executor.submit(_extract_pdf_page_worker, t): t[1] for t in tasks}
+                for future in as_completed(future_to_page):
+                    page_num, text, fname = future.result()
+                    if text:
+                        pages_data.append({
+                            "page_number": page_num,
+                            "text": text,
+                            "source": fname
+                        })
+        except Exception as proc_err:
+            logger.warning(f"ProcessPoolExecutor bypassed on cloud environment ({proc_err}). Running sequential extraction fallback.")
+            pages_data = []
+            for t in tasks:
+                p_num, txt, fname = _extract_pdf_page_worker(t)
+                if txt:
+                    pages_data.append({"page_number": p_num, "text": txt, "source": fname})
 
         pages_data.sort(key=lambda x: x["page_number"])
-        logger.info(f"Extracted {len(pages_data)} pages from '{filename}' concurrently ({self.num_cores} workers).")
+        logger.info(f"Extracted {len(pages_data)} pages from '{filename}'.")
         return pages_data
 
     def chunk_texts_parallel(self, items: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
         """
         Splits multiple text blocks / SEC 10-K sections concurrently using subword TokenTextSplitter.
-        
-        Args:
-            items: List of (text_content, base_metadata_dict) tuples.
-            
-        Returns:
-            Flat list of processed chunk dicts (id, content, metadata).
         """
         if not items:
             return []
@@ -190,16 +192,22 @@ class ParallelIngestionPipeline:
             return _chunk_text_worker(tasks[0])
 
         all_chunks = []
-        with ProcessPoolExecutor(max_workers=min(self.num_cores, len(items))) as executor:
-            futures = [executor.submit(_chunk_text_worker, t) for t in tasks]
-            for future in as_completed(futures):
-                try:
-                    res_chunks = future.result()
-                    all_chunks.extend(res_chunks)
-                except Exception as e:
-                    logger.error(f"Error in parallel chunk worker: {e}")
+        try:
+            with ProcessPoolExecutor(max_workers=min(self.num_cores, len(items))) as executor:
+                futures = [executor.submit(_chunk_text_worker, t) for t in tasks]
+                for future in as_completed(futures):
+                    try:
+                        res_chunks = future.result()
+                        all_chunks.extend(res_chunks)
+                    except Exception as e:
+                        logger.error(f"Error in parallel chunk worker: {e}")
+        except Exception as proc_err:
+            logger.warning(f"ProcessPoolExecutor chunking bypassed ({proc_err}). Running sequential chunking.")
+            all_chunks = []
+            for t in tasks:
+                all_chunks.extend(_chunk_text_worker(t))
 
-        logger.info(f"Parallel chunking generated {len(all_chunks)} token-aligned chunks across {len(items)} inputs.")
+        logger.info(f"Generated {len(all_chunks)} token-aligned chunks across {len(items)} inputs.")
         return all_chunks
 
 # Global Singleton Pipeline instance

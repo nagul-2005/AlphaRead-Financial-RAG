@@ -75,13 +75,13 @@ def health_check():
     }
 
 @app.post("/upload")
-def upload_pdf(file: UploadFile = File(...)):
+async def upload_pdf(file: UploadFile = File(...)):
     """Accepts PDF file, extracts text, chunks using LangChain splitter, and stores vectors in ChromaDB."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
         
     try:
-        pdf_bytes = file.file.read()
+        pdf_bytes = await file.read()
         pages_data = extract_text_from_pdf_bytes(pdf_bytes, filename=file.filename)
         
         if not pages_data:
