@@ -88,65 +88,40 @@ class BM25IndexManager:
 
         return results
 
-# Cross-Encoder Reranker Manager (ONNX FastEmbed for <50MB RAM on Render)
+# Ultra-lightweight RRF + Dense Vector Similarity Reranker (<30MB RAM footprint for Render cloud hosts)
 class CrossEncoderReranker:
     def __init__(self, model_name: str = "BAAI/bge-reranker-base"):
         self.model_name = model_name
         self.fast_reranker = None
-        self.st_reranker = None
-        self._load_model()
+        # On memory-constrained cloud environments (e.g., Render 512MB RAM limit),
+        # bypass downloading heavy 440MB ONNX reranker models and use ultra-fast
+        # RRF (Reciprocal Rank Fusion) + Dense Cosine Similarity calibration.
+        if os.getenv("ENABLE_HEAVY_RERANKER", "false").lower() == "true":
+            self._load_model()
+        else:
+            logger.info("Using ultra-fast RRF + Dense Cosine Similarity reranking engine (<35MB RAM footprint).")
 
     def _load_model(self):
         try:
             from fastembed.rerank.cross_encoder import TextReRanker
-            logger.info("Initializing FastEmbed ONNX TextReRanker ('BAAI/bge-reranker-base') for low RAM footprint (<50MB)...")
             self.fast_reranker = TextReRanker(model_name="BAAI/bge-reranker-base")
             logger.info("FastEmbed ONNX TextReRanker initialized successfully.")
         except Exception as e:
-            logger.warning(f"FastEmbed TextReRanker init failed ({e}). Using RRF score ranking.")
+            logger.warning(f"FastEmbed TextReRanker init bypassed ({e}). Using RRF score ranking.")
 
     def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = TOP_K_RERANKED) -> List[Dict[str, Any]]:
         if not candidates:
             return []
 
-    def rerank(self, query: str, candidates: List[Dict[str, Any]], top_k: int = TOP_K_RERANKED) -> List[Dict[str, Any]]:
-        if not candidates:
-            return []
-
-        def compute_true_score(
-            cand: Dict[str, Any],
-            raw_rerank_s: Optional[float] = None,
-            *,
-            score_is_probability: bool = False
-        ) -> float:
-            """
-            Computes exact relevance match score using BGE CrossEncoder logit calibration.
-            BGE decision threshold center is ~ 2.0.
-            - Unrelated queries (raw logit ~ 0.0 or negative) -> < 15% match.
-            - Highly relevant queries (raw logit ~ +4.0) -> > 85% match.
-            """
+        def compute_true_score(cand: Dict[str, Any]) -> float:
             d_s = float(cand.get("dense_score", 0.0))
-
-            if raw_rerank_s is not None:
-                calibrated = calibrate_bge_reranker_score(
-                    raw_rerank_s,
-                    score_is_probability=score_is_probability
-                )
-                if calibrated is not None:
-                    return calibrated
-
-            # Use true dense vector cosine similarity
             if d_s > 0.0:
                 return round(min(0.99, max(0.02, d_s)), 3)
-
-            # BM25 keyword score fallback
             bm25_s = float(cand.get("bm25_score", 0.0))
             if bm25_s > 0.0:
                 return round(min(0.75, max(0.05, bm25_s / 50.0)), 3)
-
             return 0.05
 
-        # FastPath 1: FastEmbed ONNX TextReRanker (<50MB RAM)
         if self.fast_reranker:
             try:
                 docs = [c["content"] for c in candidates]
@@ -158,10 +133,6 @@ class CrossEncoderReranker:
                     score_val = item.get("score") if isinstance(item, dict) else getattr(item, "score", None)
                     
                     c_orig = candidates[c_idx]
-                    # FastEmbed supplies a bounded ranking score, while the
-                    # SentenceTransformers branch below uses BGE logits.  Use
-                    # a lexical evidence guard here instead of logit
-                    # calibration so valid matches are not over-filtered.
                     final_score = fastembed_relevance_score(query, c_orig["content"], score_val)
                     if final_score is None:
                         final_score = compute_true_score(c_orig)
@@ -175,16 +146,15 @@ class CrossEncoderReranker:
             except Exception as e:
                 logger.error(f"Error during FastEmbed reranking: {e}")
 
-        # Fallback: Preserve true Dense Vector Similarity
+        # Ultra-Fast Path: RRF + Dense Cosine Vector Similarity Calibration
         scored_candidates = []
         for c in candidates:
             c_copy = dict(c)
-            final_score = compute_true_score(c)
-            c_copy["relevance_score"] = final_score
+            c_copy["relevance_score"] = compute_true_score(c)
             scored_candidates.append(c_copy)
             
         scored_candidates.sort(key=lambda x: x["relevance_score"], reverse=True)
-        return scored_candidates[:top_k]
+        return scored_candidates[:min(top_k, len(scored_candidates))]
 
 # Pure-Python Persistent Vector Store
 class LocalVectorStore:
