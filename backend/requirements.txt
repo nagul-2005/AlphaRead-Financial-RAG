@@ -6,6 +6,7 @@ pdfplumber>=0.10.0
 pymupdf>=1.24.0
 edgartools>=2.0.0
 langchain-text-splitters>=0.0.1
+tiktoken>=0.6.0
 fastembed>=0.2.0
 groq>=0.4.0
 requests>=2.31.0

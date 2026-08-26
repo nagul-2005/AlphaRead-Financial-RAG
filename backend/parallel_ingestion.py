@@ -69,18 +69,23 @@ def _chunk_text_worker(args: Tuple[str, Dict[str, Any], int, int]) -> List[Dict[
         return []
 
     # Use TokenTextSplitter matching FastEmbed/BAAI subword token boundaries
+    raw_chunks = []
     if TokenTextSplitter is not None:
-        splitter = TokenTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
-        )
-        raw_chunks = splitter.split_text(text)
-    else:
-        # Naive word-level fallback if langchain_text_splitters is unavailable
+        try:
+            splitter = TokenTextSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap
+            )
+            raw_chunks = splitter.split_text(text)
+        except Exception as t_err:
+            logger.warning(f"TokenTextSplitter warning ({t_err}). Using word-level fallback.")
+
+    if not raw_chunks:
+        # Fast word-level fallback
         words = text.split()
         raw_chunks = []
-        step = chunk_size - chunk_overlap
-        for i in range(0, len(words), max(1, step)):
+        step = max(1, chunk_size - chunk_overlap)
+        for i in range(0, len(words), step):
             raw_chunks.append(" ".join(words[i:i + chunk_size]))
 
     processed_chunks = []
