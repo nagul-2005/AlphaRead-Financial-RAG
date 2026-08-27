@@ -82,8 +82,8 @@ export default function HeroCatalogue({ selectedVariantIndex, onSelectVariant, o
           </h1>
 
           {/* Lede Paragraph */}
-          <p className="font-mono text-[11px] text-[#494844] leading-relaxed tracking-[0.06em]">
-            Production RAG architecture for SEC 10-K reports. Features subword token-aligned chunking (`256 tokens`), FastEmbed ONNX vector embeddings (`BAAI/bge-small-en-v1.5`), and Groq Llama-3 quantitative reasoning.
+          <p className="font-palatino text-[14.5px] text-[#494844] leading-relaxed">
+            Production RAG architecture for SEC 10-K reports. Features subword token-aligned chunking (<code className="font-mono text-[12px] bg-[#E8E6DF] px-1.5 py-0.5 border border-[#151515]/20">256 tokens</code>), FastEmbed ONNX vector embeddings (<code className="font-mono text-[12px] bg-[#E8E6DF] px-1.5 py-0.5 border border-[#151515]/20">BAAI/bge-small-en-v1.5</code>), and Groq Llama-3 quantitative reasoning.
           </p>
 
           {/* Action Buttons */}

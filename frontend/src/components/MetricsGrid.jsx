@@ -19,7 +19,7 @@ export default function MetricsGrid() {
           <h2 className="font-display font-extrabold text-3xl md:text-5xl tracking-tighter text-[#151515]">
             HYBRID <span className="text-outline">RETRIEVAL</span> METRICS
           </h2>
-          <p className="font-mono text-[11px] text-[#494844] max-w-3xl leading-relaxed">
+          <p className="font-palatino text-[14px] text-[#494844] max-w-3xl leading-relaxed">
             Quantitative architecture specs driving AlphaRead's high-speed document indexing and inference engine.
           </p>
         </div>

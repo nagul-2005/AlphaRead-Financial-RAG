@@ -18,7 +18,7 @@ export default function FooterClose({ health, onClearDatabase }) {
               ALPHAREAD <span className="text-outline">FINANCIAL</span>
             </h2>
             
-            <p className="text-[10.5px] text-[#494844] max-w-xl leading-relaxed tracking-[0.06em]">
+            <p className="font-palatino text-[14px] text-[#494844] max-w-xl leading-relaxed">
               AlphaRead Catalogue System v1.0 // Engineered for high-throughput SEC 10-K filing analysis, subword token chunking, and grounded financial RAG inference.
             </p>
           </div>

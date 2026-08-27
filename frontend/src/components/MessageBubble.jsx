@@ -18,12 +18,12 @@ export default function MessageBubble({ message }) {
         </div>
 
         {/* Paper Message Container */}
-        <div className={`p-5 font-mono text-[11px] leading-relaxed border transition-colors ${
+        <div className={`p-6 border transition-colors ${
           isUser
-            ? 'bg-[#151515] text-[#E8E6DF] border-[#151515]'
-            : 'bg-[#E8E6DF] text-[#151515] border-[#151515]/25'
+            ? 'bg-[#151515] text-[#E8E6DF] border-[#151515] font-mono text-[12.5px]'
+            : 'bg-[#E8E6DF] text-[#151515] border-[#151515]/25 font-palatino text-[14.5px] leading-relaxed'
         }`}>
-          <div className="whitespace-pre-wrap tracking-[0.04em]">
+          <div className="whitespace-pre-wrap">
             {message.text}
           </div>
 
@@ -39,14 +39,14 @@ export default function MessageBubble({ message }) {
               </button>
 
               {showCitations && (
-                <div className="space-y-2.5">
+                <div className="space-y-2.5 font-mono">
                   {message.citations.map((citation, idx) => {
                     const score = citation.relevance_score;
                     const pct = typeof score === 'number' ? Math.round(score * 100) : 85;
                     return (
                       <div
                         key={idx}
-                        className="bg-[#DEDBD2] border border-[#151515]/20 p-3 space-y-2 text-[10px] font-mono"
+                        className="bg-[#DEDBD2] border border-[#151515]/20 p-3.5 space-y-2 text-[11px]"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#151515]/16 pb-2">
                           <span className="font-bold text-[#151515] uppercase tracking-[0.1em]" title={citation.document}>
@@ -60,7 +60,7 @@ export default function MessageBubble({ message }) {
                           </div>
                         </div>
 
-                        <p className="text-[10px] text-[#494844] italic bg-[#E8E6DF] p-2.5 border border-[#151515]/16 leading-relaxed">
+                        <p className="font-palatino text-[13.5px] text-[#494844] italic bg-[#E8E6DF] p-3 border border-[#151515]/16 leading-relaxed">
                           "{citation.snippet}"
                         </p>
                       </div>

@@ -48,7 +48,7 @@ export default function EditionsTable({ onIngestSEC, onUploadPDF, documents, onD
           <h2 className="font-display font-extrabold text-3xl md:text-5xl tracking-tighter text-[#151515]">
             EDITIONS <span className="text-outline">CATALOGUE</span>
           </h2>
-          <p className="font-mono text-[11px] text-[#494844] max-w-3xl leading-relaxed">
+          <p className="font-palatino text-[14px] text-[#494844] max-w-3xl leading-relaxed">
             Direct SEC EDGAR 10-K filing retrieval pipeline and multi-core PDF document parser. Ingest filings into ChromaDB with subword token-aligned chunking.
           </p>
         </div>
@@ -88,7 +88,7 @@ export default function EditionsTable({ onIngestSEC, onUploadPDF, documents, onD
                     <td className="p-4 font-display font-extrabold text-base text-[#151515]">
                       {ed.ticker}
                     </td>
-                    <td className="p-4 text-[#494844] tracking-[0.06em]">
+                    <td className="p-4 font-palatino text-[14px] text-[#494844]">
                       {ed.company}
                     </td>
                     <td className="p-4 text-[#75736C]">

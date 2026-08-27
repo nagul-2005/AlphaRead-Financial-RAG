@@ -46,7 +46,7 @@ export default function ChatPanel({ messages, onSendMessage, isSending, document
           <h2 className="font-display font-extrabold text-3xl md:text-5xl tracking-tighter text-[#151515]">
             QUANTITATIVE <span className="text-outline">QUERY</span> ENGINE
           </h2>
-          <p className="font-mono text-[11px] text-[#494844] max-w-3xl leading-relaxed">
+          <p className="font-palatino text-[14px] text-[#494844] max-w-3xl leading-relaxed">
             Execute natural language financial analysis across ingested SEC 10-K filings and uploaded PDFs. Powered by hybrid BM25 + Dense RRF retrieval and Groq Llama-3 reasoning.
           </p>
         </div>
@@ -108,7 +108,7 @@ export default function ChatPanel({ messages, onSendMessage, isSending, document
             onChange={(e) => setInputQuery(e.target.value)}
             placeholder="Type your financial query (e.g. 'What is Microsoft revenue growth in Item 7?')..."
             disabled={isSending}
-            className="flex-1 bg-[#E8E6DF] border border-[#151515]/30 focus:border-[#C4442C] px-4 py-3.5 font-mono text-[11px] text-[#151515] placeholder-[#75736C] outline-none tracking-[0.06em]"
+            className="flex-1 bg-[#E8E6DF] border border-[#151515]/30 focus:border-[#C4442C] px-4 py-3.5 font-palatino text-[14px] text-[#151515] placeholder-[#75736C] outline-none"
           />
           <button
             type="submit"

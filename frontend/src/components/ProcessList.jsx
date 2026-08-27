@@ -28,7 +28,7 @@ export default function ProcessList() {
           <h2 className="font-display font-extrabold text-3xl md:text-5xl tracking-tighter text-[#151515]">
             EXECUTION <span className="text-outline">PIPELINE</span>
           </h2>
-          <p className="font-mono text-[11px] text-[#494844] max-w-3xl leading-relaxed">
+          <p className="font-palatino text-[14px] text-[#494844] max-w-3xl leading-relaxed">
             Sequential data transformation pipeline from document ingestion to grounded financial answer synthesis.
           </p>
         </div>
@@ -48,7 +48,7 @@ export default function ProcessList() {
                   <h4 className="font-display font-bold text-base text-[#151515] tracking-tight">
                     {step.title}
                   </h4>
-                  <p className="text-[10px] text-[#494844] tracking-[0.06em] mt-0.5 max-w-2xl">
+                  <p className="font-palatino text-[13.5px] text-[#494844] mt-0.5 max-w-2xl leading-relaxed">
                     {step.desc}
                   </p>
                 </div>

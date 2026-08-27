@@ -9,14 +9,16 @@
     --paper-muted: #75736C;
     --paper-vermilion: #C4442C;
     --paper-hairline: rgba(21, 21, 21, 0.16);
+    --font-palatino: 'Palatino', 'Palatino Linotype', 'Palatino LT STD', 'Book Antiqua', 'Georgia', serif;
   }
 
   body {
     background-color: var(--paper-ground);
     color: var(--paper-ink);
-    font-family: 'Spline Sans Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 0.08em;
+    font-family: var(--font-palatino);
+    font-size: 14px;
+    line-height: 1.6;
+    letter-spacing: 0.01em;
     -webkit-font-smoothing: antialiased;
     border-radius: 0 !important;
   }
@@ -32,6 +34,10 @@
   font-family: 'Familjen Grotesk', sans-serif;
   text-transform: uppercase;
   letter-spacing: -0.035em;
+}
+
+.font-palatino {
+  font-family: 'Palatino', 'Palatino Linotype', 'Palatino LT STD', 'Book Antiqua', 'Georgia', serif;
 }
 
 .font-mono-code {
