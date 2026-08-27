@@ -1,109 +1,75 @@
 import React, { useState } from 'react';
-import { Bot, User, FileText, ChevronDown, ChevronUp, ExternalLink, Bookmark, Sparkles } from 'lucide-react';
 
 export default function MessageBubble({ message }) {
   const isUser = message.sender === 'user';
   const [showCitations, setShowCitations] = useState(true);
 
   return (
-    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} my-3 group`}>
-      <div className={`flex max-w-[85%] sm:max-w-[78%] space-x-3 ${isUser ? 'flex-row-reverse space-x-reverse' : 'flex-row'}`}>
+    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} my-4`}>
+      <div className={`w-full max-w-4xl space-y-2 ${isUser ? 'items-end' : 'items-start'}`}>
         
-        {/* Avatar */}
-        <div className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
-          isUser 
-            ? 'bg-slate-800 text-white' 
-            : 'bg-gradient-to-br from-teal-500 to-emerald-500 text-white shadow-teal-500/20'
+        {/* Paper Header Strip */}
+        <div className={`flex items-center gap-3 font-mono text-[9.5px] uppercase tracking-[0.14em] ${
+          isUser ? 'justify-end text-[#C4442C]' : 'justify-start text-[#494844]'
         }`}>
-          {isUser ? <User className="w-5 h-5" /> : <Bot className="w-5 h-5 stroke-[2.2]" />}
+          <span className={`w-1.5 h-1.5 ${isUser ? 'bg-[#C4442C]' : 'bg-[#151515]'}`} />
+          <span>{isUser ? '[USER QUERY]' : '[ALPHAREAD INTELLIGENCE OUPUT]'}</span>
+          <span className="text-[#75736C]">{message.timestamp || '00:00'}</span>
         </div>
 
-        {/* Content Container */}
-        <div className="flex flex-col space-y-2">
-          
-          {/* Main Bubble */}
-          <div className={`px-5 py-4 rounded-3xl text-sm leading-relaxed ${
-            isUser
-              ? 'bg-slate-800 text-white font-medium rounded-tr-sm shadow-sm'
-              : 'bg-white border border-slate-100 text-slate-800 rounded-tl-sm shadow-soft'
-          }`}>
-            
-            {/* Sender Label */}
-            <div className="flex items-center justify-between text-[11px] font-semibold mb-1.5 opacity-70">
-              <span>{isUser ? 'You' : 'AlphaRead AI'}</span>
-              <span>{message.timestamp || 'Just now'}</span>
-            </div>
+        {/* Paper Message Container */}
+        <div className={`p-5 font-mono text-[11px] leading-relaxed border transition-colors ${
+          isUser
+            ? 'bg-[#151515] text-[#E8E6DF] border-[#151515]'
+            : 'bg-[#E8E6DF] text-[#151515] border-[#151515]/25'
+        }`}>
+          <div className="whitespace-pre-wrap tracking-[0.04em]">
+            {message.text}
+          </div>
 
-            {/* Message Body */}
-            <div className="whitespace-pre-wrap font-normal text-grey-700 leading-relaxed">
-              {message.text}
-            </div>
+          {/* Source Citations Section */}
+          {!isUser && message.citations && message.citations.length > 0 && (
+            <div className="mt-5 pt-4 border-t border-[#151515]/20 space-y-3">
+              <button
+                onClick={() => setShowCitations(!showCitations)}
+                className="flex items-center justify-between w-full font-mono text-[9.5px] uppercase tracking-[0.14em] text-[#C4442C] bg-[#DEDBD2] hover:bg-[#151515] hover:text-[#E8E6DF] p-2.5 border border-[#151515]/20 transition-colors"
+              >
+                <span>[RAG SOURCE CITATIONS: {message.citations.length} CHUNKS]</span>
+                <span>{showCitations ? '[- HIDE]' : '[+ EXPAND]'}</span>
+              </button>
 
-            {/* Source Citations Section (For AI Messages) */}
-            {!isUser && message.citations && message.citations.length > 0 && (
-              <div className="mt-4 pt-3 border-t border-slate-100">
-                <button
-                  onClick={() => setShowCitations(!showCitations)}
-                  className="flex items-center justify-between w-full text-xs font-bold text-slate-600 hover:text-teal-700 bg-slate-50/80 hover:bg-teal-50/50 px-3 py-2 rounded-xl transition-all border border-slate-200/60"
-                >
-                  <div className="flex items-center space-x-2">
-                    <Bookmark className="w-3.5 h-3.5 text-teal-600" />
-                    <span>Source Citations ({message.citations.length} RAG Chunks)</span>
-                  </div>
-                  {showCitations ? (
-                    <ChevronUp className="w-3.5 h-3.5" />
-                  ) : (
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  )}
-                </button>
-
-                {/* Collapsible Citation Cards */}
-                {showCitations && (
-                  <div className="mt-3 space-y-2 animate-fadeIn">
-                    {message.citations.map((citation, idx) => (
+              {showCitations && (
+                <div className="space-y-2.5">
+                  {message.citations.map((citation, idx) => {
+                    const score = citation.relevance_score;
+                    const pct = typeof score === 'number' ? Math.round(score * 100) : 85;
+                    return (
                       <div
                         key={idx}
-                        className="bg-slate-50/90 border border-slate-200/80 rounded-2xl p-3 text-xs space-y-1.5 hover:border-teal-300 transition-all shadow-sm"
+                        className="bg-[#DEDBD2] border border-[#151515]/20 p-3 space-y-2 text-[10px] font-mono"
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-1.5 text-teal-800 font-bold">
-                            <FileText className="w-3.5 h-3.5 text-teal-600" />
-                            <span className="truncate max-w-[200px]" title={citation.document}>
-                              {citation.document}
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#151515]/16 pb-2">
+                          <span className="font-bold text-[#151515] uppercase tracking-[0.1em]" title={citation.document}>
+                            [SRC {citation.source_id || idx + 1}] {citation.document}
+                          </span>
+                          <div className="flex items-center gap-3 text-[#75736C]">
+                            <span>SEC/PAGE: {citation.section_or_page}</span>
+                            <span className="bg-[#151515] text-[#E8E6DF] px-2 py-0.5 font-bold text-[9px]">
+                              {pct}% MATCH
                             </span>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <span className="text-[10px] text-slate-500 font-medium">
-                              Page/Sec: {citation.section_or_page}
-                            </span>
-                            {typeof citation.relevance_score === 'number' && (() => {
-                              const score = citation.relevance_score;
-                              const pct = Math.round(score * 100);
-                              const badgeStyle = pct >= 70 
-                                ? "bg-emerald-100 text-emerald-800 border-emerald-200" 
-                                : pct >= 40 
-                                  ? "bg-amber-100 text-amber-800 border-amber-200" 
-                                  : "bg-slate-100 text-slate-700 border-slate-200";
-                              return (
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${badgeStyle}`}>
-                                  {pct}% Match
-                                </span>
-                              );
-                            })()}
                           </div>
                         </div>
 
-                        <p className="text-[11px] text-slate-600 italic bg-white p-2.5 rounded-xl border border-slate-200/50 leading-relaxed font-sans">
+                        <p className="text-[10px] text-[#494844] italic bg-[#E8E6DF] p-2.5 border border-[#151515]/16 leading-relaxed">
                           "{citation.snippet}"
                         </p>
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-          </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
 
         </div>
 

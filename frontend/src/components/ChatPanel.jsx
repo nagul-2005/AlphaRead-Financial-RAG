@@ -1,159 +1,125 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, Sparkles, MessageSquare, Loader2, Compass } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 
-export default function ChatPanel({
-  messages,
-  onSendMessage,
-  isSending,
-  documentsCount
-}) {
-  const [input, setInput] = useState('');
+const SAMPLE_QUERIES = [
+  "What is Microsoft annual revenue and Azure growth in Item 7?",
+  "What are NVIDIA primary Risk Factors in Item 1A?",
+  "Analyze Apple Services gross margin and R&D expenses.",
+  "What are Tesla automotive gross margin trends and risk factors?"
+];
+
+export default function ChatPanel({ messages, onSendMessage, isSending, documentsCount }) {
+  const [inputQuery, setInputQuery] = useState('');
   const messagesEndRef = useRef(null);
 
-  const starterPrompts = [
-    "Summarize key Management Discussion (MD&A) insights",
-    "What are the top 3 Risk Factors mentioned in the 10-K?",
-    "Highlight revenue growth drivers and quarterly performance",
-    "Analyze debt obligations and liquidity risk factors"
-  ];
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isSending]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!input.trim() || isSending) return;
-    onSendMessage(input.trim());
-    setInput('');
+    if (!inputQuery.trim() || isSending) return;
+    onSendMessage(inputQuery.trim());
+    setInputQuery('');
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit(e);
-    }
-  };
-
-  const handlePromptClick = (promptText) => {
+  const handleSelectSample = (sample) => {
     if (isSending) return;
-    onSendMessage(promptText);
+    onSendMessage(sample);
   };
 
   return (
-    <div className="bg-white rounded-3xl shadow-soft border border-slate-100/80 flex flex-col h-full overflow-hidden relative">
-      
-      {/* Top Chat Header */}
-      <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-white z-10 shrink-0">
-        <div className="flex items-center space-x-3">
-          <div className="w-8 h-8 rounded-xl bg-teal-50 text-teal-700 flex items-center justify-center font-bold text-sm border border-teal-100">
-            <MessageSquare className="w-4 h-4" />
+    <section id="rag-terminal" className="bg-[#E8E6DF] border-b border-[#151515]/16 p-6 md:p-12">
+      <div className="max-w-7xl mx-auto space-y-8">
+        
+        {/* Section Header Tag */}
+        <div className="border-b border-[#151515]/16 pb-4 flex flex-wrap items-center justify-between gap-4 font-mono text-[10px] uppercase tracking-[0.14em]">
+          <div className="flex items-center gap-2 text-[#C4442C]">
+            <span className="w-2 h-2 bg-[#C4442C]" />
+            <span>[SECTION 01 // QUANTITATIVE QUERY TERMINAL]</span>
           </div>
-          <div>
-            <h2 className="text-base font-bold text-slate-800 tracking-tight">Financial AI Assistant</h2>
-            <p className="text-xs text-slate-400 font-medium">
-              ChromaDB Context Retrieval • Llama-3 Reasoning
-            </p>
+          <span className="text-[#75736C]">INDEXED VECTOR KNOWLEDGE: {documentsCount} DOCUMENTS</span>
+        </div>
+
+        {/* Headline mixing SOLID and OUTLINED words */}
+        <div className="space-y-2">
+          <h2 className="font-display font-extrabold text-3xl md:text-5xl tracking-tighter text-[#151515]">
+            QUANTITATIVE <span className="text-outline">QUERY</span> ENGINE
+          </h2>
+          <p className="font-mono text-[11px] text-[#494844] max-w-3xl leading-relaxed">
+            Execute natural language financial analysis across ingested SEC 10-K filings and uploaded PDFs. Powered by hybrid BM25 + Dense RRF retrieval and Groq Llama-3 reasoning.
+          </p>
+        </div>
+
+        {/* Sample Quick Query Chips */}
+        <div className="space-y-2">
+          <span className="text-[9px] font-mono uppercase tracking-[0.14em] text-[#75736C] block">
+            [SELECT SAMPLE SEC 10-K QUERY]
+          </span>
+          <div className="flex flex-wrap gap-2">
+            {SAMPLE_QUERIES.map((q, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSelectSample(q)}
+                disabled={isSending}
+                className="bg-[#DEDBD2] hover:bg-[#151515] hover:text-[#E8E6DF] text-[#151515] border border-[#151515]/20 px-3 py-1.5 font-mono text-[9.5px] uppercase tracking-[0.1em] transition-colors text-left"
+              >
+                [{String(idx + 1).padStart(2, '0')}] {q}
+              </button>
+            ))}
           </div>
         </div>
 
-        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200/60">
-          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-          <span>{documentsCount > 0 ? `${documentsCount} Sources Ready` : 'Awaiting Data Ingestion'}</span>
-        </div>
-      </div>
-
-      {/* Scrollable Message Thread */}
-      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center max-w-md mx-auto space-y-6 py-8">
-            <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-teal-500 to-emerald-400 flex items-center justify-center shadow-lg shadow-teal-500/20 text-white">
-              <Bot className="w-8 h-8 stroke-[2]" />
-            </div>
-            
-            <div>
-              <h3 className="text-lg font-bold text-slate-800">Welcome to AlphaRead</h3>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Upload financial PDFs or fetch stock ticker 10-K reports in the left panel, then ask any quantitative or analytical question below.
+        {/* Terminal Output Display Area */}
+        <div className="bg-[#DEDBD2] border border-[#151515]/20 min-h-[380px] max-h-[550px] overflow-y-auto p-6 space-y-6">
+          {messages.length === 0 ? (
+            <div className="h-64 flex flex-col items-center justify-center text-center space-y-3 text-[#75736C] font-mono">
+              <div className="w-4 h-4 bg-[#C4442C]/40 animate-pulse" />
+              <p className="text-[11px] uppercase tracking-[0.14em]">
+                NO ACTIVE QUERIES IN CURRENT SESSION
+              </p>
+              <p className="text-[9.5px] text-[#494844] max-w-md">
+                Select a sample query above or type a financial question into the prompt terminal below to begin analyzing SEC 10-K statements.
               </p>
             </div>
-
-            {/* Starter Prompts */}
-            <div className="w-full space-y-2 pt-2">
-              <div className="flex items-center justify-center space-x-1.5 text-xs font-semibold text-slate-400">
-                <Compass className="w-3.5 h-3.5" />
-                <span>Recommended Financial Queries:</span>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-                {starterPrompts.map((prompt, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handlePromptClick(prompt)}
-                    className="p-3 bg-slate-50 hover:bg-teal-50/60 border border-slate-200/70 hover:border-teal-300 rounded-2xl text-xs font-medium text-slate-700 hover:text-teal-900 transition-all shadow-sm text-left flex items-start space-x-2"
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-teal-600 shrink-0 mt-0.5" />
-                    <span className="leading-snug">{prompt}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {messages.map((msg, index) => (
+          ) : (
+            messages.map((msg, index) => (
               <MessageBubble key={index} message={msg} />
-            ))}
-            
-            {/* Thinking / Streaming Loading State */}
-            {isSending && (
-              <div className="flex items-center space-x-3 my-3">
-                <div className="w-8 h-8 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center border border-teal-100">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                </div>
-                <div className="bg-slate-50 border border-slate-200/60 text-slate-600 text-xs px-4 py-3 rounded-2xl flex items-center space-x-2 font-medium">
-                  <span className="animate-pulse">Retrieving top 3 ChromaDB chunks & synthesizing answer...</span>
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </>
-        )}
-      </div>
+            ))
+          )}
 
-      {/* Fixed Bottom Input Area */}
-      <div className="p-4 border-t border-slate-100 bg-white shrink-0">
-        <form onSubmit={handleSubmit} className="relative flex items-center">
-          <textarea
-            rows={1}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask a question about your financial documents (Press Enter to send)..."
-            className="w-full pl-4 pr-14 py-3.5 text-sm bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-teal-500/30 focus:border-teal-500 font-medium placeholder:text-slate-400 transition-all resize-none max-h-32"
+          {isSending && (
+            <div className="bg-[#E8E6DF] border border-[#151515]/20 p-4 font-mono text-[10px] text-[#C4442C] flex items-center gap-3">
+              <span className="w-2 h-2 bg-[#C4442C] animate-ping" />
+              <span className="uppercase tracking-[0.14em]">
+                EXECUTING HYBRID VECTOR RETRIEVAL & GROQ LLAMA-3 REASONING...
+              </span>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Prompt Input Terminal Bar */}
+        <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3">
+          <input
+            type="text"
+            value={inputQuery}
+            onChange={(e) => setInputQuery(e.target.value)}
+            placeholder="Type your financial query (e.g. 'What is Microsoft revenue growth in Item 7?')..."
             disabled={isSending}
+            className="flex-1 bg-[#E8E6DF] border border-[#151515]/30 focus:border-[#C4442C] px-4 py-3.5 font-mono text-[11px] text-[#151515] placeholder-[#75736C] outline-none tracking-[0.06em]"
           />
           <button
             type="submit"
-            disabled={isSending || !input.trim()}
-            className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-900 disabled:opacity-40 text-white flex items-center justify-center transition-all shadow-md shrink-0"
+            disabled={isSending || !inputQuery.trim()}
+            className="bg-[#151515] hover:bg-[#C4442C] text-[#E8E6DF] disabled:opacity-50 border border-[#151515] px-6 py-3.5 font-mono text-[10.5px] uppercase tracking-[0.14em] transition-colors whitespace-nowrap"
           >
-            {isSending ? (
-              <Loader2 className="w-4 h-4 animate-spin text-teal-300" />
-            ) : (
-              <Send className="w-4 h-4 stroke-[2.2]" />
-            )}
+            {isSending ? '[PROCESSING...]' : '[SUBMIT QUERY]'}
           </button>
         </form>
-        <p className="text-[10px] text-center text-slate-400 mt-2 font-medium">
-          AlphaRead uses HuggingFace embeddings & ChromaDB vector store for accurate source citations.
-        </p>
-      </div>
 
-    </div>
+      </div>
+    </section>
   );
 }

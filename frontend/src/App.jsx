@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import ProgressSpine from './components/ProgressSpine';
+import VerticalRail from './components/VerticalRail';
 import Header from './components/Header';
-import IngestionPanel from './components/IngestionPanel';
+import HeroCatalogue from './components/HeroCatalogue';
 import ChatPanel from './components/ChatPanel';
+import EditionsTable from './components/EditionsTable';
+import MetricsGrid from './components/MetricsGrid';
+import ProcessList from './components/ProcessList';
+import FooterClose from './components/FooterClose';
+
 import {
   fetchHealth,
   uploadPDFFile,
@@ -20,8 +27,9 @@ export default function App() {
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [statusMessage, setStatusMessage] = useState(null);
   const [errorMessage, setErrorMessage] = useState(null);
+  const [selectedVariantIndex, setSelectedVariantIndex] = useState(0);
 
-  // Initial load
+  // Initial data load & health check
   useEffect(() => {
     checkHealthStatus();
     loadDocumentsList();
@@ -55,11 +63,11 @@ export default function App() {
   const handleUploadPDF = async (file) => {
     clearMessagesAndBanners();
     setIsProcessing(true);
-    setStatusMessage(`Ingesting PDF file '${file.name}' into vector store...`);
+    setStatusMessage(`Ingesting PDF file '${file.name}' into vector memory...`);
 
     try {
       const result = await uploadPDFFile(file);
-      setStatusMessage(`Success! Ingested '${file.name}' (${result.chunks_created} chunks created).`);
+      setStatusMessage(`Success! Ingested '${file.name}' (${result.chunks_created || 1} chunks created).`);
       await loadDocumentsList();
     } catch (err) {
       setErrorMessage(err.message || "Failed to upload and ingest PDF.");
@@ -68,7 +76,7 @@ export default function App() {
     }
   };
 
-  // Ingest SEC 10-K Ticker Handler with Sections
+  // Ingest SEC 10-K Ticker Handler
   const handleIngestSEC = async (ticker, sections = ["Item 1A", "Item 7"]) => {
     clearMessagesAndBanners();
     setIsProcessing(true);
@@ -84,6 +92,16 @@ export default function App() {
       setErrorMessage(err.message || `Failed to fetch 10-K for ${ticker}.`);
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  // Select Variant Handler
+  const handleSelectVariant = (idx) => {
+    setSelectedVariantIndex(idx);
+    const tickers = ['MSFT', 'NVDA', 'AAPL', 'TSLA', 'AMZN', 'GOOGL'];
+    const selectedTicker = tickers[idx];
+    if (selectedTicker) {
+      handleIngestSEC(selectedTicker, ["Item 1A", "Item 7"]);
     }
   };
 
@@ -120,7 +138,7 @@ export default function App() {
     } catch (err) {
       const errorMsg = {
         sender: 'ai',
-        text: `Error processing query: ${err.message || 'Server error'}. Make sure the backend server is running on port 8000.`,
+        text: `Error processing query: ${err.message || 'Server error'}. Please ensure the backend is running.`,
         citations: [],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       };
@@ -132,55 +150,76 @@ export default function App() {
 
   // Clear Database Index Handler
   const handleClearDatabase = async () => {
-    if (!window.confirm("Are you sure you want to clear all vectors from the database index?")) return;
+    if (!window.confirm("Are you sure you want to clear all vector memory from the database?")) return;
     clearMessagesAndBanners();
     try {
       await clearVectorDatabase();
       setDocuments([]);
       setMessages([]);
-      setStatusMessage("Vector store cleared successfully.");
+      setStatusMessage("Vector store memory cleared successfully.");
     } catch (err) {
-      setErrorMessage("Failed to clear database index.");
+      setErrorMessage("Failed to clear vector database index.");
     }
   };
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 font-sans overflow-hidden">
+    <div className="relative min-h-screen bg-[#E8E6DF] text-[#151515] font-mono selection:bg-[#C4442C] selection:text-[#E8E6DF]">
       
-      {/* Header */}
-      <Header
-        health={health}
-        onClearDatabase={handleClearDatabase}
-        documentsCount={documents.length}
-      />
+      {/* 1. Fixed Progress Spine */}
+      <ProgressSpine />
 
-      {/* Main 2-Column Dashboard Layout */}
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-hidden max-w-7xl mx-auto w-full">
+      {/* 2. Fixed Left Vertical Rail */}
+      <VerticalRail />
+
+      {/* 3. Main Content Offset by 34px Left Rail on Desktop */}
+      <div className="md:pl-[34px] flex flex-col min-h-screen">
         
-        {/* Left Column: Data & SEC Ingestion (5 Cols = ~40% width) */}
-        <div className="lg:col-span-5 h-full overflow-hidden">
-          <IngestionPanel
-            onUploadPDF={handleUploadPDF}
-            onIngestSEC={handleIngestSEC}
-            onDeleteDocument={handleDeleteDocument}
-            documents={documents}
-            isProcessing={isProcessing}
-            statusMessage={statusMessage}
-            errorMessage={errorMessage}
-          />
-        </div>
+        {/* Header Navigation */}
+        <Header
+          health={health}
+          onClearDatabase={handleClearDatabase}
+          documentsCount={documents.length}
+        />
 
-        {/* Right Column: Chat Interface (7 Cols = ~60% width) */}
-        <div className="lg:col-span-7 h-full overflow-hidden">
-          <ChatPanel
-            messages={messages}
-            onSendMessage={handleSendMessage}
-            isSending={isSendingChat}
-            documentsCount={documents.length}
-          />
-        </div>
+        {/* Hero Catalogue Section */}
+        <HeroCatalogue
+          selectedVariantIndex={selectedVariantIndex}
+          onSelectVariant={handleSelectVariant}
+          onIngestSEC={handleIngestSEC}
+        />
 
-      </main>
+        {/* Section 01: Quantitative Query Terminal */}
+        <ChatPanel
+          messages={messages}
+          onSendMessage={handleSendMessage}
+          isSending={isSendingChat}
+          documentsCount={documents.length}
+        />
+
+        {/* Section 02: SEC Editions Table & PDF Zone */}
+        <EditionsTable
+          onIngestSEC={handleIngestSEC}
+          onUploadPDF={handleUploadPDF}
+          documents={documents}
+          onDeleteDocument={handleDeleteDocument}
+          isProcessing={isProcessing}
+          statusMessage={statusMessage}
+          errorMessage={errorMessage}
+        />
+
+        {/* Section 03: Architecture Metrics Three-Cell Grid */}
+        <MetricsGrid />
+
+        {/* Section 04: Execution Pipeline Process List */}
+        <ProcessList />
+
+        {/* Section 05: System Close & Cropped Wordmark */}
+        <FooterClose
+          health={health}
+          onClearDatabase={handleClearDatabase}
+        />
+
+      </div>
 
     </div>
   );

@@ -1,44 +1,122 @@
 @import "tailwindcss";
 
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+@layer base {
+  :root {
+    --paper-ground: #E8E6DF;
+    --paper-ground-secondary: #DEDBD2;
+    --paper-ink: #151515;
+    --paper-ink-secondary: #494844;
+    --paper-muted: #75736C;
+    --paper-vermilion: #C4442C;
+    --paper-hairline: rgba(21, 21, 21, 0.16);
+  }
 
-@theme {
-  --font-sans: 'Plus Jakarta Sans', 'Inter', sans-serif;
-  --shadow-soft: 0 4px 20px -2px rgba(0, 0, 0, 0.04);
-  --shadow-soft-lg: 0 12px 36px -4px rgba(0, 0, 0, 0.07);
+  body {
+    background-color: var(--paper-ground);
+    color: var(--paper-ink);
+    font-family: 'Spline Sans Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    -webkit-font-smoothing: antialiased;
+    border-radius: 0 !important;
+  }
+
+  * {
+    border-radius: 0 !important;
+    box-shadow: none !important;
+  }
 }
 
-body {
-  background-color: #f8fafc;
-  color: #1e293b;
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+/* Custom Typography & Utility Classes */
+.font-display {
+  font-family: 'Familjen Grotesk', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: -0.035em;
 }
 
-/* Custom smooth scrollbars */
+.font-mono-code {
+  font-family: 'Spline Sans Mono', monospace;
+}
+
+/* Outlined Word Typography Signature */
+.text-outline {
+  color: transparent !important;
+  -webkit-text-stroke: 1.5px #151515;
+}
+
+.text-outline-vermilion {
+  color: transparent !important;
+  -webkit-text-stroke: 1.5px #C4442C;
+}
+
+.text-outline-light {
+  color: transparent !important;
+  -webkit-text-stroke: 1px rgba(21, 21, 21, 0.18);
+}
+
+/* Writing mode for fixed vertical rail */
+.writing-mode-vertical {
+  writing-mode: vertical-rl;
+  transform: rotate(-180deg);
+}
+
+/* Paper Catalogue Hairline Borders */
+.border-paper-hairline {
+  border-color: rgba(21, 21, 21, 0.16);
+}
+
+.bg-paper-ground {
+  background-color: #E8E6DF;
+}
+
+.bg-paper-ground-secondary {
+  background-color: #DEDBD2;
+}
+
+/* Blur Reveal Animations */
+@media (prefers-reduced-motion: no-preference) {
+  .blur-reveal {
+    opacity: 0;
+    transform: translateY(26px);
+    filter: blur(9px);
+    transition: opacity 0.8s ease-out, transform 0.8s ease-out, filter 0.8s ease-out;
+    will-change: opacity, transform, filter;
+  }
+
+  .blur-reveal.revealed {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0px);
+  }
+
+  .blur-reveal-hero {
+    opacity: 0;
+    filter: blur(14px);
+    transition: opacity 1s ease-out, filter 1s ease-out;
+    will-change: opacity, filter;
+  }
+
+  .blur-reveal-hero.revealed {
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+
+/* Custom paper scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #E8E6DF;
+  border-left: 1px solid rgba(21, 21, 21, 0.16);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 9999px;
+  background: #C4442C;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-@keyframes pulse-subtle {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-.animate-pulse-subtle {
-  animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  background: #151515;
 }
