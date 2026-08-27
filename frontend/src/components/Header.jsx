@@ -10,10 +10,10 @@ export default function Header({ health, onClearDatabase, documentsCount }) {
       <div className="flex items-center gap-3">
         <div className="w-2.5 h-2.5 bg-[#C4442C]" />
         <span className="font-display font-bold text-sm tracking-tighter text-[#151515]">
-          ALPHAREAD <span className="text-outline">CATALOGUE</span>
+          ALPHAREAD <span className="text-outline">FINANCIAL </span>
         </span>
         <span className="hidden sm:inline border-l border-[#151515]/16 pl-3 text-[#75736C]">
-          OBJECT NO. 2025-SEC-10K
+          RAG AI
         </span>
       </div>
 
