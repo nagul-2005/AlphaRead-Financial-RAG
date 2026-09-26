@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://alpharead-backend.onrender.com";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://al-93a5fc7d8e1f416c96d9dec5463286d4.ecs.us-east-1.on.aws";
 
 export async function fetchHealth() {
   const res = await fetch(`${API_BASE_URL}/health`);
